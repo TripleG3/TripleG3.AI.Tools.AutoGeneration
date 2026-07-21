@@ -12,12 +12,13 @@ env:
   DOTNET_VERSION: 10.0.x
   CONFIGURATION: Release
   PROJECT_PATH: src/TripleG3.AI.Tools.AutoGeneration/TripleG3.AI.Tools.AutoGeneration.csproj
+  TEST_PROJECT_PATH: tests/TripleG3.AI.Tools.AutoGeneration.Tests/TripleG3.AI.Tools.AutoGeneration.Tests.csproj
   PACKAGE_OUTPUT_PATH: artifacts/packages
   PACKAGE_VERSION: 0.0.${{ github.run_number }}
 
 jobs:
   publish:
-    name: Build, package, and publish
+    name: Build, test, package, and publish
     runs-on: ubuntu-latest
 
     steps:
@@ -30,17 +31,24 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore
-        run: dotnet restore ${{ env.PROJECT_PATH }}
+        run: dotnet restore ${{ env.TEST_PROJECT_PATH }}
 
       - name: Build
         run: >-
-          dotnet build ${{ env.PROJECT_PATH }}
+          dotnet build ${{ env.TEST_PROJECT_PATH }}
           --configuration ${{ env.CONFIGURATION }}
           --no-restore
           /p:Version=${{ env.PACKAGE_VERSION }}
           /p:RepositoryBranch=${{ github.ref_name }}
           /p:RepositoryCommit=${{ github.sha }}
           /p:ContinuousIntegrationBuild=true
+
+      - name: Test unit tests
+        run: >-
+          dotnet test ${{ env.TEST_PROJECT_PATH }}
+          --configuration ${{ env.CONFIGURATION }}
+          --no-build
+          --verbosity normal
 
       - name: Pack NuGet package
         run: >-

@@ -1,7 +1,10 @@
 # Repository Instructions
 
-- 2026-07-17: Keep `TripleG3.AI.Tools.AutoGeneration` host-neutral. Its source, project metadata, documentation, public APIs, and generated messages must not contain application-specific names or behavior. Applications integrate through `GeneratedTool`, `GeneratedToolCatalog`, `ToolTargetResolver`, `IToolCatalogService`, `AddToolAssembly`, and `ChatToolDiscovery`.
+- 2026-07-17: Keep `TripleG3.AI.Tools.AutoGeneration` host-neutral. Its source, project metadata, documentation, public APIs, and generated messages must not contain application-specific names or behavior. Applications integrate through `GeneratedTool`, `GeneratedToolCatalog`, `ToolTargetResolver`, `IToolCatalogService`, `AddToolAssembly`, and `ResponseToolDiscovery`.
 - 2026-07-21: Keep the README an implementation-facing, API-accurate guide: document the annotated-method contract, explicit catalog discovery, category progressive disclosure, target resolution, invocation-state handling, and result serialization without prescribing an application host.
 - 2026-07-21: Pack the repository README at the NuGet package root and set `PackageReadmeFile` to `README.md` so published packages render the implementation guide.
 - 2026-07-21: Pack the repository `LICENSE` at the NuGet package root and set `PackageLicenseFile` to `LICENSE` so the package metadata and README license link remain valid.
 - 2026-07-21: Publish this package from pushes to `main` with GitHub Actions, .NET 10, package version `0.0.${{ github.run_number }}`, and the `NUGET_API_KEY` repository secret; build and pack the library project directly because the repository has no solution or test project.
+- 2026-07-21: Generate native `OpenAI.Responses.FunctionTool` definitions and bind `FunctionCallResponseItem` inputs; do not expose Chat Completions types because the package targets the Responses API.
+- 2026-07-21: The OpenAI 2.9.1 Responses API is marked experimental by the SDK; this package intentionally opts in by suppressing `OPENAI001` at its project boundary.
+- 2026-07-21: Verify the Responses-only contract with xUnit: generated `FunctionTool` values must fit `CreateResponseOptions`, and a `FunctionCallResponseItem` must produce a matching `FunctionCallOutputResponseItem`.

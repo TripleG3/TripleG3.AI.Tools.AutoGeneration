@@ -56,7 +56,7 @@ public sealed class ToolCatalogService : StateService<GeneratedToolCatalog>, ITo
         ArgumentNullException.ThrowIfNull(scanAssemblies);
         Assembly[] assemblies = [.. scanAssemblies.Select(item => item.Assembly).Distinct()];
         catalog = new Lazy<GeneratedToolCatalog>(
-            () => ChatToolDiscovery.CreateToolCatalog(assemblies),
+            () => ResponseToolDiscovery.CreateToolCatalog(assemblies),
             LazyThreadSafetyMode.ExecutionAndPublication);
     }
 

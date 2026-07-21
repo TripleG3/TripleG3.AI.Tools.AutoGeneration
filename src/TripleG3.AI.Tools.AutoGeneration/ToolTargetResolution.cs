@@ -1,11 +1,11 @@
-using OpenAI.Chat;
+using OpenAI.Responses;
 
 namespace TripleG3.AI.Tools.AutoGeneration;
 
 /// <summary>Resolves an instance-method target for a generated tool invocation.</summary>
 public delegate ValueTask<object?> ToolTargetResolver(
     GeneratedTool tool,
-    ChatToolCall call,
+    FunctionCallResponseItem call,
     CancellationToken cancellationToken);
 
 public static class ToolTargetResolvers
@@ -33,12 +33,12 @@ public static class ToolTargetResolvers
 
             object target = services.GetService(tool.TargetType)
                 ?? throw new InvalidOperationException(
-                    $"Tool '{tool.ChatTool.FunctionName}' requires target type '{tool.TargetType.FullName ?? tool.TargetType.Name}', but the service provider did not return an instance for that type.");
+                    $"Tool '{tool.ResponseTool.FunctionName}' requires target type '{tool.TargetType.FullName ?? tool.TargetType.Name}', but the service provider did not return an instance for that type.");
             return ValueTask.FromResult<object?>(target);
         };
     }
 
-    public static ToolTargetResolver FromLookup(Func<GeneratedTool, ChatToolCall, object?> lookup)
+    public static ToolTargetResolver FromLookup(Func<GeneratedTool, FunctionCallResponseItem, object?> lookup)
     {
         ArgumentNullException.ThrowIfNull(lookup);
         return (tool, call, cancellationToken) => ValueTask.FromResult(lookup(tool, call));
@@ -46,7 +46,7 @@ public static class ToolTargetResolvers
 
     private static ValueTask<object?> ResolveDefaultAsync(
         GeneratedTool tool,
-        ChatToolCall call,
+        FunctionCallResponseItem call,
         CancellationToken cancellationToken) =>
         tool.TargetInstance is not null
             ? ValueTask.FromResult<object?>(tool.TargetInstance)

@@ -1,8 +1,8 @@
 # TripleG3.AI.Tools.AutoGeneration
 
-`TripleG3.AI.Tools.AutoGeneration` is host-neutral reflection infrastructure for exposing annotated .NET methods as OpenAI function tools. It creates `OpenAI.Chat.ChatTool` definitions, builds JSON Schema from .NET types, binds tool-call JSON back to method arguments, invokes the reflected method, and serializes the result.
+`TripleG3.AI.Tools.AutoGeneration` is host-neutral reflection infrastructure for exposing annotated .NET methods as OpenAI Responses API function tools. It creates `OpenAI.Responses.FunctionTool` definitions, builds JSON Schema from .NET types, binds `FunctionCallResponseItem` JSON back to method arguments, invokes the reflected method, and creates Responses API function-output items.
 
-The library does not run a chat-completion loop, enforce authorization, or know how an application creates tool-target instances. The host application owns those concerns. This separation makes the package suitable for web applications, workers, console applications, and agent hosts.
+The library does not run a Responses API loop, enforce authorization, or know how an application creates tool-target instances. The host application owns those concerns. This separation makes the package suitable for web applications, workers, console applications, and agent hosts.
 
 ## Contents
 
@@ -24,18 +24,20 @@ The library does not run a chat-completion loop, enforce authorization, or know 
 The normal host flow is:
 
 1. Define a method with `[Tool]` and exactly one trailing `CancellationToken`.
-2. Scan one or more explicitly selected assemblies with `ChatToolDiscovery.CreateToolCatalog(...)`.
-3. Send each `GeneratedTool.ChatTool` from `catalog.CreatePrimaryTools()` to the model.
-4. When the model returns a `ChatToolCall`, locate the matching `GeneratedTool` by function name.
-5. Resolve an instance target for instance methods, invoke the generated tool, and serialize its result.
-6. Return the serialized payload to the model in the host SDK's tool-result message correlated to `ChatToolCall.Id`.
-7. Repeat the chat-completion loop until the model returns a final response.
+2. Scan one or more explicitly selected assemblies with `ResponseToolDiscovery.CreateToolCatalog(...)`.
+3. Add each `GeneratedTool.ResponseTool` from `catalog.CreatePrimaryTools()` to `CreateResponseOptions.Tools`.
+4. When `ResponseResult.OutputItems` contains a `FunctionCallResponseItem`, locate the matching `GeneratedTool` by function name.
+5. Resolve an instance target for instance methods and invoke the generated tool.
+6. Add the resulting `FunctionCallOutputResponseItem` to the next `CreateResponseOptions.InputItems`, correlated through `FunctionCallResponseItem.CallId`.
+7. Repeat the Responses API request flow until the model returns a final response.
 
 `GeneratedToolCatalog` is the authoritative lookup table between model-visible function names and .NET methods. Do not infer a method from a model-provided name yourself.
 
 ## Requirements and reference
 
-The project targets `net10.0` and exposes types from `OpenAI.Chat`. Reference the project, or the package produced by your organization's distribution process, from the host application.
+The project targets `net10.0` and exposes types from `OpenAI.Responses`. Reference the project, or the package produced by your organization's distribution process, from the host application.
+
+OpenAI 2.9.1 marks its Responses API types with the `OPENAI001` experimental diagnostic. This package intentionally opts into that SDK surface. A host that directly uses `OpenAI.Responses` types must also suppress `OPENAI001` when its build configuration requires it.
 
 For a source-based reference, add the library project to the host project:
 
@@ -56,7 +58,7 @@ Hosts that use the DI integration also need:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
-using OpenAI.Chat;
+using OpenAI.Responses;
 using TripleG3.AI.Tools.AutoGeneration;
 ```
 
@@ -152,7 +154,7 @@ The library accepts synchronous return values, `Task`, `Task<T>`, `ValueTask`, a
 | `ToolAttribute.IsAlwaysAvailable` | `[Tool]` property | For a tool in a category, includes that tool in `PrimaryTools` in addition to the category selector. All uncategorized tools are already primary. |
 | `ToolAttribute.IsLongRunning` | `[Tool]` property | Preserved on `GeneratedTool` for host behavior or UI. It does not schedule, poll, or timeout work automatically. |
 | `ToolAttribute.SchemaVersion` | `[Tool]` property | Version metadata reported by a category descriptor. It does not alter generated JSON Schema. |
-| `ToolAttribute.Aliases` | `[Tool]` property | Creates an additional `ChatTool` definition for every non-empty alias. Each alias invokes the same method. |
+| `ToolAttribute.Aliases` | `[Tool]` property | Creates an additional `FunctionTool` definition for every non-empty alias. Each alias invokes the same method. |
 | `ToolAttribute.Replaces` | `[Tool]` property | Informational replacement metadata reported by a category descriptor. It does not redirect calls. |
 | `ToolAttribute.IsDeprecated` | `[Tool]` property | Excludes the tool from both assembly discovery and delegate registration. |
 | `ToolAttribute.DeprecationMessage` | `[Tool]` property | Informational deprecation metadata reported by a category descriptor. |
@@ -190,7 +192,7 @@ public Task<string> GetWeatherAsync(string city, CancellationToken cancellationT
 
 ## Generated parameter schema
 
-Each `ChatTool` receives a JSON Schema object with `type: "object"`, `properties`, `required`, and `additionalProperties: false`. The function description comes from `ToolAttribute.Description`.
+Each `FunctionTool` receives a JSON Schema object with `type: "object"`, `properties`, `required`, and `additionalProperties: false`. The function description comes from `ToolAttribute.Description`.
 
 The schema generator handles common .NET shapes as follows:
 
@@ -224,18 +226,28 @@ Prefer explicit assembly scanning so tool exposure is deterministic:
 
 ```csharp
 using System.Reflection;
-using OpenAI.Chat;
+using OpenAI.Responses;
 using TripleG3.AI.Tools.AutoGeneration;
 
 Assembly toolsAssembly = typeof(PlaceTools).Assembly;
-GeneratedToolCatalog catalog = ChatToolDiscovery.CreateToolCatalog([toolsAssembly]);
+GeneratedToolCatalog catalog = ResponseToolDiscovery.CreateToolCatalog([toolsAssembly]);
 
-ChatTool[] initialChatTools = catalog.CreatePrimaryTools()
-	.Select(tool => tool.ChatTool)
+FunctionTool[] initialResponseTools = catalog.CreatePrimaryTools()
+	.Select(tool => tool.ResponseTool)
 	.ToArray();
+
+CreateResponseOptions requestOptions = new()
+{
+	Model = "gpt-5.1"
+};
+
+foreach (FunctionTool responseTool in initialResponseTools)
+{
+	requestOptions.Tools.Add(responseTool);
+}
 ```
 
-Pass `initialChatTools` to the `Tools` collection or equivalent tool-definition parameter of the OpenAI chat-completion request used by the host. `ChatToolDiscovery` caches catalogs by the scanned assemblies and their module version IDs.
+Pass `requestOptions` to `ResponsesClient.CreateResponseAsync(...)`. `ResponseToolDiscovery` caches catalogs by the scanned assemblies and their module version IDs.
 
 The catalog exposes these views:
 
@@ -255,7 +267,7 @@ The catalog exposes these views:
 Set `isManuallyRegistered: true` when an annotated method must not be included in assembly scanning. It can still be registered through a delegate:
 
 ```csharp
-GeneratedTool[] tools = ChatToolDiscovery.CreateTools(
+GeneratedTool[] tools = ResponseToolDiscovery.CreateTools(
 	(Func<string, CancellationToken, Task<string>>)ManualTools.RunAsync);
 ```
 
@@ -285,20 +297,20 @@ After a model invokes a category selector:
 
 1. Execute it using the same invocation path as any other tool.
 2. Return the resulting category descriptor to the model.
-3. Include the selected category's tools in the next chat-completion request, usually alongside the original primary tools.
+3. Include the selected category's tools in the next Responses request, usually alongside the original primary tools.
 
 For example, preserve initial definitions and add the selected category members without duplicating names:
 
 ```csharp
 if (catalog.TryGetCategory(categoryCall.FunctionName, out GeneratedToolCategory category))
 {
-	ChatTool[] nextChatTools = catalog.CreatePrimaryTools()
+	FunctionTool[] nextResponseTools = catalog.CreatePrimaryTools()
 		.Concat(category.CreateTools())
-		.DistinctBy(tool => tool.ChatTool.FunctionName, StringComparer.Ordinal)
-		.Select(tool => tool.ChatTool)
+		.DistinctBy(tool => tool.ResponseTool.FunctionName, StringComparer.Ordinal)
+		.Select(tool => tool.ResponseTool)
 		.ToArray();
 
-	// Send nextChatTools with the next model request.
+	// Add nextResponseTools to the next CreateResponseOptions.Tools collection.
 }
 ```
 
@@ -306,17 +318,17 @@ Use `CreateAllTools()` instead when the host does not need progressive disclosur
 
 ## Resolve targets and invoke calls
 
-`ChatToolCall` values arrive from the host's OpenAI client. Resolve them through the catalog, then invoke the corresponding `GeneratedTool`. The following helper is suitable for a host tool-call loop:
+`FunctionCallResponseItem` values arrive in `ResponseResult.OutputItems`. Resolve them through the catalog, then invoke the corresponding `GeneratedTool`. The following helper is suitable for a Responses API tool-call loop:
 
 ```csharp
-using OpenAI.Chat;
+using OpenAI.Responses;
 using TripleG3.AI.Tools.AutoGeneration;
 
-public static class ToolCallExecutor
+public static class ResponseToolCallExecutor
 {
-	public static async Task<string> ExecuteAsync(
+	public static async Task<FunctionCallOutputResponseItem> ExecuteAsync(
 		GeneratedToolCatalog catalog,
-		ChatToolCall call,
+		FunctionCallResponseItem call,
 		ToolTargetResolver targetResolver,
 		CancellationToken cancellationToken)
 	{
@@ -326,15 +338,12 @@ public static class ToolCallExecutor
 		}
 
 		object? target = await targetResolver(tool, call, cancellationToken);
-		var state = await tool.InvokeAsync(call, target, cancellationToken);
-		ToolInvocationState invocation = GeneratedTool.GetReadyInvocationValueOrThrow(state);
-
-		return tool.SerializeResult(invocation.Result);
+		return await tool.InvokeAndCreateFunctionCallOutputAsync(call, target, cancellationToken);
 	}
 }
 ```
 
-`GeneratedTool.InvokeAsync(...)` binds the JSON object in `ChatToolCall.FunctionArguments` to the method parameters. It:
+`GeneratedTool.InvokeAsync(...)` binds the JSON object in `FunctionCallResponseItem.FunctionArguments` to the method parameters. `GeneratedTool.InvokeAndCreateFunctionCallOutputAsync(...)` adds the normal Responses API result step by returning a `FunctionCallOutputResponseItem` linked to `FunctionCallResponseItem.CallId`. It:
 
 - Rejects calls whose function name is neither the declared tool name nor an alias.
 - Requires a JSON object for arguments.
@@ -344,7 +353,20 @@ public static class ToolCallExecutor
 - Converts primitives, object graphs, `JsonElement`, `JsonNode`, `BinaryData`, enums, collections, and dictionaries with `System.Text.Json`.
 - Unwraps `TargetInvocationException` so application exceptions retain their original type.
 
-The invocation returns a state object rather than the result directly. Always use `GeneratedTool.GetReadyInvocationValueOrThrow(...)` before reading `ToolInvocationState.Result`; it turns failed or non-ready invocation states into a `ToolInvocationException`.
+The lower-level invocation method returns a state object rather than the result directly. When using `InvokeAsync(...)`, call `GeneratedTool.GetReadyInvocationValueOrThrow(...)` before reading `ToolInvocationState.Result`; it turns failed or non-ready invocation states into a `ToolInvocationException`.
+
+For each function output, create the next Responses request with the previous response ID and the output item:
+
+```csharp
+CreateResponseOptions continuationRequest = new()
+{
+	Model = "gpt-5.1",
+	PreviousResponseId = response.Id
+};
+
+continuationRequest.InputItems.Add(functionOutput);
+ResponseResult nextResponse = await responsesClient.CreateResponseAsync(continuationRequest, cancellationToken);
+```
 
 ### Target-resolution options
 
@@ -354,19 +376,19 @@ Use one of the supplied resolvers, or write one that fits the host lifetime and 
 | --- | --- |
 | `ToolTargetResolvers.Default` | Uses a captured delegate target when present; otherwise returns `null` for static methods and calls `Activator.CreateInstance` for instance methods. |
 | `ToolTargetResolvers.FromServiceProvider(services)` | Uses a captured target when present; otherwise obtains an instance-method target from the specified `IServiceProvider`. |
-| `ToolTargetResolvers.FromLookup(lookup)` | Calls host-supplied `Func<GeneratedTool, ChatToolCall, object?>` logic for each call. |
+| `ToolTargetResolvers.FromLookup(lookup)` | Calls host-supplied `Func<GeneratedTool, FunctionCallResponseItem, object?>` logic for each call. |
 
 For a dependency-injected host, resolve targets from the service provider that owns the active request or scope:
 
 ```csharp
 ToolTargetResolver targetResolver = ToolTargetResolvers.FromServiceProvider(serviceProvider);
-string resultPayload = await ToolCallExecutor.ExecuteAsync(
+FunctionCallOutputResponseItem functionOutput = await ResponseToolCallExecutor.ExecuteAsync(
 	catalog,
 	toolCall,
 	targetResolver,
 	cancellationToken);
 
-// Create the OpenAI SDK's tool-result message with toolCall.Id and resultPayload.
+// Add functionOutput to the next CreateResponseOptions.InputItems collection.
 ```
 
 The package deliberately does not authorize calls. Validate user identity, tenant boundaries, resource ownership, and side-effect permissions inside the resolver and/or tool implementation before performing work.
@@ -429,7 +451,7 @@ Before exposing a new application method as a tool, verify all of the following:
 7. Instance tool types are registered in DI or handled by a custom `ToolTargetResolver`.
 8. The host scans only intended assemblies and resolves calls exclusively with `GeneratedToolCatalog.TryGetTool(...)`.
 9. The host checks authorization and validates any domain-specific constraints before executing side effects.
-10. The host returns `tool.SerializeResult(invocation.Result)` using the model call's identifier, then continues its chat-completion loop.
+10. The host returns a `FunctionCallOutputResponseItem` using the model call's `CallId`, then continues its Responses API loop.
 
 ## License
 
