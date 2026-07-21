@@ -1,3 +1,6 @@
 # Repository Instructions
 
 - 2026-07-17: Keep `TripleG3.AI.Tools.AutoGeneration` host-neutral. Its source, project metadata, documentation, public APIs, and generated messages must not contain application-specific names or behavior. Applications integrate through `GeneratedTool`, `GeneratedToolCatalog`, `ToolTargetResolver`, `IToolCatalogService`, `AddToolAssembly`, and `ChatToolDiscovery`.
+- 2026-07-21: Keep the README an implementation-facing, API-accurate guide: document the annotated-method contract, explicit catalog discovery, category progressive disclosure, target resolution, invocation-state handling, and result serialization without prescribing an application host.
+- 2026-07-21: Pack the repository README at the NuGet package root and set `PackageReadmeFile` to `README.md` so published packages render the implementation guide.
+- 2026-07-21: Pack the repository `LICENSE` at the NuGet package root and set `PackageLicenseFile` to `LICENSE` so the package metadata and README license link remain valid.

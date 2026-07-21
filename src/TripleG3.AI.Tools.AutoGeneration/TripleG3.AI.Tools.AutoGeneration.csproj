@@ -5,9 +5,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <WarningsAsErrors>nullable</WarningsAsErrors>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="..\..\LICENSE" Pack="true" PackagePath="/" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
     <PackageReference Include="OpenAI" Version="2.9.1" />
