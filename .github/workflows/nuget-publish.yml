@@ -1,0 +1,62 @@
+name: Publish NuGet Package
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: 10.0.x
+  CONFIGURATION: Release
+  PROJECT_PATH: src/TripleG3.AI.Tools.AutoGeneration/TripleG3.AI.Tools.AutoGeneration.csproj
+  PACKAGE_OUTPUT_PATH: artifacts/packages
+  PACKAGE_VERSION: 0.0.${{ github.run_number }}
+
+jobs:
+  publish:
+    name: Build, package, and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Build
+        run: >-
+          dotnet build ${{ env.PROJECT_PATH }}
+          --configuration ${{ env.CONFIGURATION }}
+          --no-restore
+          /p:Version=${{ env.PACKAGE_VERSION }}
+          /p:RepositoryBranch=${{ github.ref_name }}
+          /p:RepositoryCommit=${{ github.sha }}
+          /p:ContinuousIntegrationBuild=true
+
+      - name: Pack NuGet package
+        run: >-
+          dotnet pack ${{ env.PROJECT_PATH }}
+          --configuration ${{ env.CONFIGURATION }}
+          --no-build
+          --output ${{ env.PACKAGE_OUTPUT_PATH }}
+          /p:PackageVersion=${{ env.PACKAGE_VERSION }}
+          /p:Version=${{ env.PACKAGE_VERSION }}
+          /p:RepositoryBranch=${{ github.ref_name }}
+          /p:RepositoryCommit=${{ github.sha }}
+          /p:ContinuousIntegrationBuild=true
+
+      - name: Publish NuGet package
+        run: >-
+          dotnet nuget push ${{ env.PACKAGE_OUTPUT_PATH }}/*.nupkg
+          --api-key "${{ secrets.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

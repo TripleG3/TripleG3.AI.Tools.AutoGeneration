@@ -4,3 +4,4 @@
 - 2026-07-21: Keep the README an implementation-facing, API-accurate guide: document the annotated-method contract, explicit catalog discovery, category progressive disclosure, target resolution, invocation-state handling, and result serialization without prescribing an application host.
 - 2026-07-21: Pack the repository README at the NuGet package root and set `PackageReadmeFile` to `README.md` so published packages render the implementation guide.
 - 2026-07-21: Pack the repository `LICENSE` at the NuGet package root and set `PackageLicenseFile` to `LICENSE` so the package metadata and README license link remain valid.
+- 2026-07-21: Publish this package from pushes to `main` with GitHub Actions, .NET 10, package version `0.0.${{ github.run_number }}`, and the `NUGET_API_KEY` repository secret; build and pack the library project directly because the repository has no solution or test project.
