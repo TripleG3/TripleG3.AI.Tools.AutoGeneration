@@ -1,5 +1,3 @@
-using TripleG3.AI.Tools.AutoGeneration;
-
 namespace TripleG3.AI.Tools.AutoGeneration.Tests.ImageGeneration;
 
 [ToolCategory("image_generation_toolbox", "Provides image generation tools.")]

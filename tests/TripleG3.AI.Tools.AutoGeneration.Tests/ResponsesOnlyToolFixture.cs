@@ -1,5 +1,3 @@
-using TripleG3.AI.Tools.AutoGeneration;
-
 namespace TripleG3.AI.Tools.AutoGeneration.Tests;
 
 public static class ResponsesOnlyToolFixture

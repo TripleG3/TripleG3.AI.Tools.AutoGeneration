@@ -10,3 +10,4 @@
 - 2026-07-21: Verify the Responses-only contract with xUnit: generated `FunctionTool` values must fit `CreateResponseOptions`, and a `FunctionCallResponseItem` must produce a matching `FunctionCallOutputResponseItem`.
 - 2026-07-21: Keep class-level `ToolCategory` as a toolbox mechanism and assign cross-cutting categories only through each method's `ToolAttribute.Categories`; catalog lookup must include toolbox-contained and standalone functions alike.
 - 2026-07-21: Use `TripleG3.AI.Tools.AutoGeneration.slnx` as the repository solution; it includes the library and test projects for solution-level build and test validation.
+- 2026-07-21: Keep shared imports in a `GlobalUsings.cs` file at the root of each project; retain file-local usings only when they are unique to that file.
