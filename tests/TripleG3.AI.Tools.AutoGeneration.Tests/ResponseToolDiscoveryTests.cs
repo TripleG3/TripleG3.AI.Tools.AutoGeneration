@@ -1,4 +1,6 @@
 using System.Text.Json;
+using OpenAI.Realtime;
+using OpenAI.Responses;
 
 namespace TripleG3.AI.Tools.AutoGeneration.Tests;
 

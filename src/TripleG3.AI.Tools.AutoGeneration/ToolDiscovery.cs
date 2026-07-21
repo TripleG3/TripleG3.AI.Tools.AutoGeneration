@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
+using OpenAI.Realtime;
+using OpenAI.Responses;
 
 namespace TripleG3.AI.Tools.AutoGeneration;
 

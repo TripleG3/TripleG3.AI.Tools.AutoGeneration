@@ -4,6 +4,9 @@ using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using OpenAI.Realtime;
+using OpenAI.Responses;
+using TripleG3.Cis;
 
 namespace TripleG3.AI.Tools.AutoGeneration;
 
