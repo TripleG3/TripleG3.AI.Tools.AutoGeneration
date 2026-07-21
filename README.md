@@ -1,6 +1,6 @@
 # TripleG3.AI.Tools.AutoGeneration
 
-`TripleG3.AI.Tools.AutoGeneration` is host-neutral reflection infrastructure for exposing annotated .NET methods as OpenAI Responses API function tools. It creates `OpenAI.Responses.FunctionTool` definitions, builds JSON Schema from .NET types, binds `FunctionCallResponseItem` JSON back to method arguments, invokes the reflected method, and creates Responses API function-output items.
+`TripleG3.AI.Tools.AutoGeneration` is host-neutral reflection infrastructure for exposing annotated .NET methods as OpenAI function tools. It builds one JSON Schema from .NET types, then projects each discovered `GeneratedTool` into either an `OpenAI.Responses.FunctionTool` or an `OpenAI.Realtime.RealtimeFunctionTool`.
 
 The library does not run a Responses API loop, enforce authorization, or know how an application creates tool-target instances. The host application owns those concerns. This separation makes the package suitable for web applications, workers, console applications, and agent hosts.
 
@@ -12,6 +12,7 @@ The library does not run a Responses API loop, enforce authorization, or know ho
 - [Attribute reference](#attribute-reference)
 - [Generated parameter schema](#generated-parameter-schema)
 - [Discover tools](#discover-tools)
+- [Choose a tool transport](#choose-a-tool-transport)
 - [Use toolboxes](#use-toolboxes)
 - [Find tools by function category](#find-tools-by-function-category)
 - [Resolve targets and invoke calls](#resolve-targets-and-invoke-calls)
@@ -33,6 +34,29 @@ The normal host flow is:
 7. Repeat the Responses API request flow until the model returns a final response.
 
 `GeneratedToolCatalog` is the authoritative lookup table between model-visible function names and .NET methods. Do not infer a method from a model-provided name yourself.
+
+## Choose a tool transport
+
+Tool discovery is transport-neutral. Scan an assembly once and keep the returned `GeneratedToolCatalog` as the authoritative reflected-method and JSON-schema catalog. Select the SDK-specific projection only when configuring a model session or request:
+
+```csharp
+GeneratedToolCatalog catalog = ResponseToolDiscovery.CreateToolCatalog([toolsAssembly]);
+
+// Responses API
+FunctionTool[] responsesTools = catalog.CreatePrimaryResponsesTools();
+
+// Realtime API
+RealtimeFunctionTool[] realtimeTools = catalog.CreatePrimaryRealtimeTools();
+```
+
+For an individual generated tool, use:
+
+```csharp
+FunctionTool responsesTool = generatedTool.ToResponsesTool();
+RealtimeFunctionTool realtimeTool = generatedTool.ToRealtimeTool();
+```
+
+Both projections use the same function name, description, aliases, and generated JSON parameter schema. Tool invocation remains host-owned: the Responses host resolves `FunctionCallResponseItem` values, while a Realtime host resolves `RealtimeFunctionCallItem` values and returns a matching realtime function-call-output item before starting a follow-up response.
 
 ## Requirements and reference
 

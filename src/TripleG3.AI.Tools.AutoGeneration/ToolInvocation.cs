@@ -4,8 +4,6 @@ using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using OpenAI.Responses;
-using TripleG3.Cis;
 
 namespace TripleG3.AI.Tools.AutoGeneration;
 
@@ -65,6 +63,12 @@ public static class FunctionCallResponseItemExtensions
 public sealed class GeneratedTool(FunctionTool responseTool, Type? targetType, MethodInfo methodInfo, object? targetInstance = null, bool isRequired = false, bool isLongRunning = false, bool isAlwaysAvailable = false, bool isCategoryTool = false, string? categoryName = null, string? categoryDescription = null, IReadOnlyList<GeneratedTool>? categoryTools = null, string? friendlyUIDescription = null, IReadOnlyList<string>? categoryNames = null) : StateService<ToolInvocationState>
 {
     public FunctionTool ResponseTool { get; } = responseTool ?? throw new ArgumentNullException(nameof(responseTool)); public Type? TargetType { get; } = targetType; public object? TargetInstance { get; } = targetInstance; public MethodInfo MethodInfo { get; } = Register(responseTool, methodInfo, isCategoryTool); public bool IsRequired { get; } = isRequired; public bool IsLongRunning { get; } = isLongRunning; public bool IsAlwaysAvailable { get; } = isAlwaysAvailable; public bool IsCategoryTool { get; } = isCategoryTool; public string? CategoryName { get; } = categoryName; public string? CategoryDescription { get; } = categoryDescription; public IReadOnlyList<GeneratedTool> CategoryTools { get; } = categoryTools is null ? [] : [.. categoryTools]; public IReadOnlyList<string> CategoryNames { get; } = categoryNames is null ? [] : [.. categoryNames]; public string FriendlyUIDescription { get; } = string.IsNullOrWhiteSpace(friendlyUIDescription) ? responseTool.FunctionName : friendlyUIDescription.Trim();
+    public FunctionTool ToResponsesTool() => ResponseTool;
+    public RealtimeFunctionTool ToRealtimeTool() => new(ResponseTool.FunctionName)
+    {
+        FunctionDescription = ResponseTool.FunctionDescription,
+        FunctionParameters = ResponseTool.FunctionParameters
+    };
     public string SerializeResult(object? result) => ToolResultJsonSerializer.Serialize(result, MethodInfo);
     public FunctionCallOutputResponseItem CreateFunctionCallOutput(FunctionCallResponseItem call, object? result) { ArgumentNullException.ThrowIfNull(call); return ResponseItem.CreateFunctionCallOutputItem(call.CallId, SerializeResult(result)); }
     public async ValueTask<FunctionCallOutputResponseItem> InvokeAndCreateFunctionCallOutputAsync(FunctionCallResponseItem call, object? target = null, CancellationToken cancellationToken = default) { State<ToolInvocationState> state = await InvokeAsync(call, target, cancellationToken).ConfigureAwait(false); return CreateFunctionCallOutput(call, GetReadyInvocationValueOrThrow(state).Result); }

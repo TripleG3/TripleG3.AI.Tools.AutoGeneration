@@ -1,6 +1,4 @@
 using System.Text.Json;
-using OpenAI.Responses;
-using TripleG3.AI.Tools.AutoGeneration;
 
 namespace TripleG3.AI.Tools.AutoGeneration.Tests;
 
@@ -77,5 +75,28 @@ public sealed class ResponseToolDiscoveryTests
 
         Assert.False(catalog.TryGetToolsForCategory("MissingCategory", out IReadOnlyList<GeneratedTool> missingTools));
         Assert.Empty(missingTools);
+    }
+
+    [Fact]
+    public void GeneratedTool_ProjectsEquivalentResponsesAndRealtimeFunctionTools()
+    {
+        GeneratedToolCatalog catalog = ResponseToolDiscovery.CreateToolCatalog([typeof(ResponsesOnlyToolFixture).Assembly]);
+        GeneratedTool generatedTool = Assert.Single(
+            catalog.CreatePrimaryTools(),
+            tool => tool.ResponseTool.FunctionName == "add_numbers");
+
+        FunctionTool responsesTool = generatedTool.ToResponsesTool();
+        RealtimeFunctionTool realtimeTool = generatedTool.ToRealtimeTool();
+
+        Assert.Same(generatedTool.ResponseTool, responsesTool);
+        Assert.Equal(responsesTool.FunctionName, realtimeTool.FunctionName);
+        Assert.Equal(responsesTool.FunctionDescription, realtimeTool.FunctionDescription);
+        Assert.Equal(responsesTool.FunctionParameters.ToString(), realtimeTool.FunctionParameters.ToString());
+        Assert.Equal(
+            catalog.CreatePrimaryTools().Select(tool => tool.ResponseTool.FunctionName),
+            catalog.CreatePrimaryResponsesTools().Select(tool => tool.FunctionName));
+        Assert.Equal(
+            catalog.CreatePrimaryTools().Select(tool => tool.ResponseTool.FunctionName),
+            catalog.CreatePrimaryRealtimeTools().Select(tool => tool.FunctionName));
     }
 }

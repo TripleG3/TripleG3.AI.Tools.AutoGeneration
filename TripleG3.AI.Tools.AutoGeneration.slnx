@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TripleG3.AI.Tools.AutoGeneration/TripleG3.AI.Tools.AutoGeneration.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TripleG3.AI.Tools.AutoGeneration.Tests/TripleG3.AI.Tools.AutoGeneration.Tests.csproj" />
+  </Folder>
+</Solution>
