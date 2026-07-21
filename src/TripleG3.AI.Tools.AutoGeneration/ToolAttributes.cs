@@ -11,6 +11,7 @@ public class ToolAttribute(string name, string description, string friendlyUIDes
     public bool IsLongRunning { get; set; }
     public int SchemaVersion { get; set; } = 1;
     public string[]? Aliases { get; set; }
+    public string[]? Categories { get; set; }
     public string[]? Replaces { get; set; }
     public bool IsDeprecated { get; set; }
     public string? DeprecationMessage { get; set; }

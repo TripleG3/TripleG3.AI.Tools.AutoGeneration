@@ -12,7 +12,8 @@ The library does not run a Responses API loop, enforce authorization, or know ho
 - [Attribute reference](#attribute-reference)
 - [Generated parameter schema](#generated-parameter-schema)
 - [Discover tools](#discover-tools)
-- [Use categories](#use-categories)
+- [Use toolboxes](#use-toolboxes)
+- [Find tools by function category](#find-tools-by-function-category)
 - [Resolve targets and invoke calls](#resolve-targets-and-invoke-calls)
 - [Serialize results](#serialize-results)
 - [Dependency injection](#dependency-injection)
@@ -155,6 +156,7 @@ The library accepts synchronous return values, `Task`, `Task<T>`, `ValueTask`, a
 | `ToolAttribute.IsLongRunning` | `[Tool]` property | Preserved on `GeneratedTool` for host behavior or UI. It does not schedule, poll, or timeout work automatically. |
 | `ToolAttribute.SchemaVersion` | `[Tool]` property | Version metadata reported by a category descriptor. It does not alter generated JSON Schema. |
 | `ToolAttribute.Aliases` | `[Tool]` property | Creates an additional `FunctionTool` definition for every non-empty alias. Each alias invokes the same method. |
+| `ToolAttribute.Categories` | `[Tool]` property | Adds zero or more independent categories to this function. These do not come from, and are not inherited from, a class-level `ToolCategory` toolbox. |
 | `ToolAttribute.Replaces` | `[Tool]` property | Informational replacement metadata reported by a category descriptor. It does not redirect calls. |
 | `ToolAttribute.IsDeprecated` | `[Tool]` property | Excludes the tool from both assembly discovery and delegate registration. |
 | `ToolAttribute.DeprecationMessage` | `[Tool]` property | Informational deprecation metadata reported by a category descriptor. |
@@ -256,9 +258,12 @@ The catalog exposes these views:
 | `PrimaryTools` / `CreatePrimaryTools()` | Initial tool definitions. This includes all uncategorized tools, every category selector, and category tools marked required or always available. |
 | `AllTools` / `CreateAllTools()` | Every discovered tool definition, including all category members and aliases. Use this when category-based progressive disclosure is unnecessary. |
 | `RequiredTools` | Tools marked with `ToolRequired`, including category members that are not otherwise primary. |
-| `Categories` | Generated category selector plus the tools it reveals. |
+| `Categories` | Class-level toolboxes: each generated selector plus the tools it reveals. |
+| `CategoryNames` | Every distinct function category assigned through `ToolAttribute.Categories`. |
+| `CreateToolsForCategory(name)` | A new array containing every generated tool in the named function category, or an empty array when no tools match. |
+| `TryGetToolsForCategory(name, out tools)` | Looks up every generated tool in the named function category without treating an empty result as an error. |
 | `TryGetTool(name, out tool)` | Resolve a model tool-call name, including an alias, to its generated tool. |
-| `TryGetCategory(name, out category)` | Detect and inspect a category-selector call. |
+| `TryGetCategory(name, out category)` | Detect and inspect a class-level toolbox selector call. |
 
 `CreateToolCatalog()` and `CreateTools()` overloads without assemblies scan the calling assembly. They are convenient for simple applications, but explicit assemblies are preferable for reusable host infrastructure.
 
@@ -273,9 +278,9 @@ GeneratedTool[] tools = ResponseToolDiscovery.CreateTools(
 
 Delegate registration preserves a captured instance as `GeneratedTool.TargetInstance`. The delegate method still needs `[Tool]`, must satisfy the trailing-cancellation-token rule, and is skipped if `IsDeprecated` is true. The overload that accepts both assemblies and delegates combines both sources.
 
-## Use categories
+## Use toolboxes
 
-Apply `ToolCategory` to a type when a host should initially expose a compact selector rather than every tool in that group.
+Apply `ToolCategory` to a type when a host should initially expose a compact selector rather than every tool in that group. It is a toolbox mechanism only: it does not assign a function category to the methods in the type.
 
 ```csharp
 [ToolCategory("documents", "Finds, reads, and updates documents.")]
@@ -291,7 +296,7 @@ public sealed class DocumentTools
 }
 ```
 
-Discovery generates a zero-argument `documents` selector. Invoking that selector returns a list of `ToolCategoryToolInfo` records containing each tool's name, description, parameter schema, required status, availability metadata, version, aliases, replacements, and deprecation metadata.
+Discovery generates a zero-argument `documents` selector. Invoking that selector returns a list of `ToolCategoryToolInfo` records containing each tool's name, description, parameter schema, required status, availability metadata, version, function categories, aliases, replacements, and deprecation metadata.
 
 After a model invokes a category selector:
 
@@ -315,6 +320,47 @@ if (catalog.TryGetCategory(categoryCall.FunctionName, out GeneratedToolCategory 
 ```
 
 Use `CreateAllTools()` instead when the host does not need progressive disclosure.
+
+## Find tools by function category
+
+Use `ToolAttribute.Categories` on each function for cross-cutting discovery. A function can have zero or more categories regardless of its declaring type, namespace, or toolbox membership.
+
+```csharp
+public static class ImageGenerationTools
+{
+	[Tool(
+		"generate_image",
+		"Generates an image from a prompt.",
+		"Generating an image",
+		Categories = ["ImageToolsCategory", "ImageGenerationCategory"])]
+	public static Task<string> GenerateAsync(string prompt, CancellationToken cancellationToken) =>
+		Task.FromResult(prompt);
+}
+
+public static class ImageEditingTools
+{
+	[Tool(
+		"edit_image",
+		"Edits an existing image.",
+		"Editing an image",
+		Categories = ["ImageToolsCategory", "ImageEditingCategory"])]
+	public static Task<string> EditAsync(string imageId, CancellationToken cancellationToken) =>
+		Task.FromResult(imageId);
+}
+```
+
+Retrieve every generated tool definition for a category through the catalog:
+
+```csharp
+GeneratedTool[] imageTools = catalog.CreateToolsForCategory("ImageToolsCategory");
+
+if (catalog.TryGetToolsForCategory("ImageEditingCategory", out IReadOnlyList<GeneratedTool> editingTools))
+{
+	// Add editingTools.Select(tool => tool.ResponseTool) to a Responses request as needed.
+}
+```
+
+Function categories are normalized by trimming whitespace, blank values are ignored, and duplicate names on one function are removed. Lookup is ordinal and case-sensitive. The index uses `AllTools`, so a function inside a toolbox is discoverable by category even when it is not initially exposed through `PrimaryTools`.
 
 ## Resolve targets and invoke calls
 
@@ -449,9 +495,10 @@ Before exposing a new application method as a tool, verify all of the following:
 5. Input DTOs use public serializable properties and `ToolSchema` descriptions where the model needs help constructing them.
 6. Result DTOs use `ToolResult` and explicit `JsonPropertyName` values when the model benefits from a self-describing response.
 7. Instance tool types are registered in DI or handled by a custom `ToolTargetResolver`.
-8. The host scans only intended assemblies and resolves calls exclusively with `GeneratedToolCatalog.TryGetTool(...)`.
-9. The host checks authorization and validates any domain-specific constraints before executing side effects.
-10. The host returns a `FunctionCallOutputResponseItem` using the model call's `CallId`, then continues its Responses API loop.
+8. Cross-cutting categories are assigned on each `[Tool]` through `Categories`, not on the containing toolbox type.
+9. The host scans only intended assemblies and resolves calls exclusively with `GeneratedToolCatalog.TryGetTool(...)`.
+10. The host checks authorization and validates any domain-specific constraints before executing side effects.
+11. The host returns a `FunctionCallOutputResponseItem` using the model call's `CallId`, then continues its Responses API loop.
 
 ## License
 

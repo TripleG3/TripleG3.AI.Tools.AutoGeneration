@@ -8,3 +8,4 @@
 - 2026-07-21: Generate native `OpenAI.Responses.FunctionTool` definitions and bind `FunctionCallResponseItem` inputs; do not expose Chat Completions types because the package targets the Responses API.
 - 2026-07-21: The OpenAI 2.9.1 Responses API is marked experimental by the SDK; this package intentionally opts in by suppressing `OPENAI001` at its project boundary.
 - 2026-07-21: Verify the Responses-only contract with xUnit: generated `FunctionTool` values must fit `CreateResponseOptions`, and a `FunctionCallResponseItem` must produce a matching `FunctionCallOutputResponseItem`.
+- 2026-07-21: Keep class-level `ToolCategory` as a toolbox mechanism and assign cross-cutting categories only through each method's `ToolAttribute.Categories`; catalog lookup must include toolbox-contained and standalone functions alike.
