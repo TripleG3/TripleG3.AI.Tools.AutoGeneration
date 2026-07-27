@@ -68,12 +68,30 @@ public sealed class GeneratedTool(FunctionTool responseTool, Type? targetType, M
         FunctionParameters = ResponseTool.FunctionParameters
     };
     public string SerializeResult(object? result) => ToolResultJsonSerializer.Serialize(result, MethodInfo);
+    public ValueTask<ToolInvocationResult> InvokeAsync(ToolCall call, object? target = null, CancellationToken cancellationToken = default) => InvokeTransportNeutralAsync(call, target, cancellationToken);
     public FunctionCallOutputResponseItem CreateFunctionCallOutput(FunctionCallResponseItem call, object? result) { ArgumentNullException.ThrowIfNull(call); return ResponseItem.CreateFunctionCallOutputItem(call.CallId, SerializeResult(result)); }
     public async ValueTask<FunctionCallOutputResponseItem> InvokeAndCreateFunctionCallOutputAsync(FunctionCallResponseItem call, object? target = null, CancellationToken cancellationToken = default) { State<ToolInvocationState> state = await InvokeAsync(call, target, cancellationToken).ConfigureAwait(false); return CreateFunctionCallOutput(call, GetReadyInvocationValueOrThrow(state).Result); }
     public ValueTask<State<ToolInvocationState>> InvokeAsync(FunctionCallResponseItem call, object? target = null, CancellationToken cancellationToken = default) => SetAsync(token => InvokeCoreAsync(call, target, token), cancellationToken);
     public static ToolInvocationState GetReadyInvocationValueOrThrow(State<ToolInvocationState> state) => state.Status is StateStatus.Ready && state.Value is { } value ? value : throw new ToolInvocationException(string.IsNullOrWhiteSpace(state.ErrorMessage) ? $"Tool invocation completed with state '{state.Status}'." : state.ErrorMessage);
     private async ValueTask<ToolInvocationState> InvokeCoreAsync(FunctionCallResponseItem call, object? target, CancellationToken token) { DateTimeOffset started = DateTimeOffset.UtcNow; object? result = IsCategoryTool ? ToolCategoryBuilder.Build(this) : await InvokeMethodAsync(call, target, token).ConfigureAwait(false); return ToolInvocationState.Completed(this, call, result, started, DateTimeOffset.UtcNow); }
     private async Task<object?> InvokeMethodAsync(FunctionCallResponseItem call, object? target, CancellationToken token) { object? effectiveTarget = target ?? TargetInstance; if (!MethodInfo.IsStatic && effectiveTarget is null) throw new InvalidOperationException($"Tool method '{MethodInfo.DeclaringType?.FullName}.{MethodInfo.Name}' requires a target instance."); object? result; try { result = MethodInfo.Invoke(effectiveTarget, call.ToParameters(MethodInfo, token)); } catch (TargetInvocationException exception) when (exception.InnerException is not null) { ExceptionDispatchInfo.Capture(exception.InnerException).Throw(); throw; } if (result is Task task) { await task.ConfigureAwait(false); return MethodInfo.ReturnType.IsGenericType ? MethodInfo.ReturnType.GetProperty(nameof(Task<object>.Result))?.GetValue(result) : null; } if (MethodInfo.ReturnType == typeof(ValueTask)) { await ((ValueTask)result!).ConfigureAwait(false); return null; } if (MethodInfo.ReturnType.IsGenericType && MethodInfo.ReturnType.GetGenericTypeDefinition() == typeof(ValueTask<>)) { Task taskValue = (Task)MethodInfo.ReturnType.GetMethod(nameof(ValueTask<object>.AsTask))!.Invoke(result, null)!; await taskValue.ConfigureAwait(false); return taskValue.GetType().GetProperty(nameof(Task<object>.Result))!.GetValue(taskValue); } return result; }
+    private async ValueTask<ToolInvocationResult> InvokeTransportNeutralAsync(ToolCall call, object? target, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(call);
+        if (!string.Equals(call.Name, ResponseTool.FunctionName, StringComparison.Ordinal) &&
+            !(MethodInfo.GetCustomAttribute<ToolAttribute>()?.Aliases ?? []).Contains(call.Name, StringComparer.Ordinal))
+        {
+            throw new InvalidOperationException($"Tool call '{call.Name}' does not target '{ResponseTool.FunctionName}'.");
+        }
+
+        FunctionCallResponseItem responseCall = ResponseItem.CreateFunctionCallItem(
+            call.CallId,
+            call.Name,
+            BinaryData.FromString(call.ArgumentsJson));
+        State<ToolInvocationState> state = await InvokeAsync(responseCall, target, cancellationToken).ConfigureAwait(false);
+        ToolInvocationState invocation = GetReadyInvocationValueOrThrow(state);
+        return new ToolInvocationResult(call.CallId, call.Name, invocation.Result, SerializeResult(invocation.Result), invocation);
+    }
     private static MethodInfo Register(FunctionTool tool, MethodInfo method, bool category) { ArgumentNullException.ThrowIfNull(method); if (!category) { ParameterInfo[] parameters = method.GetParameters(); ParameterInfo[] tokens = [.. parameters.Where(parameter => ToolParameterMetadata.GetType(parameter) == typeof(CancellationToken))]; if (tokens.Length != 1 || tokens[0].Position != parameters.Length - 1) throw new InvalidOperationException($"Generated tool '{tool.FunctionName}' mapped to method '{method.DeclaringType?.FullName}.{method.Name}' must declare exactly one CancellationToken as its last parameter."); } return method; }
 }
 

@@ -15,6 +15,7 @@ The library does not run a Responses API loop, enforce authorization, or know ho
 - [Choose a tool transport](#choose-a-tool-transport)
 - [Use toolboxes](#use-toolboxes)
 - [Find tools by function category](#find-tools-by-function-category)
+- [Select tools for model profiles](#select-tools-for-model-profiles)
 - [Resolve targets and invoke calls](#resolve-targets-and-invoke-calls)
 - [Serialize results](#serialize-results)
 - [Dependency injection](#dependency-injection)
@@ -385,6 +386,22 @@ if (catalog.TryGetToolsForCategory("ImageEditingCategory", out IReadOnlyList<Gen
 ```
 
 Function categories are normalized by trimming whitespace, blank values are ignored, and duplicate names on one function are removed. Lookup is ordinal and case-sensitive. The index uses `AllTools`, so a function inside a toolbox is discoverable by category even when it is not initially exposed through `PrimaryTools`.
+
+## Select tools for model profiles
+
+Perform discovery once, then select a host-side `ToolSet` for each model. `ToolAttribute.Categories` are capability labels used by the host; they are not model-facing tools.
+
+```csharp
+GeneratedToolCatalog catalog = ResponseToolDiscovery.CreateToolCatalog([toolsAssembly]);
+
+ToolSet modelATools = catalog.SelectTools(ToolSelection.ForCategories("A"));
+ToolSet modelABTools = catalog.SelectTools(ToolSelection.ForCategories("A", "B"));
+ToolSet allTools = catalog.SelectTools(ToolSelection.All);
+
+FunctionTool[] responseTools = modelABTools.CreateResponsesTools();
+```
+
+Category selection uses a union: `ForCategories("A", "B")` selects tools in `A` or `B`; it does not look for a category named `AB`. Toolbox selector tools are excluded by default. Resolve calls against the selected `ToolSet`, rather than the complete catalog, so a model cannot invoke a globally discovered tool that was not assigned to its profile.
 
 ## Resolve targets and invoke calls
 
