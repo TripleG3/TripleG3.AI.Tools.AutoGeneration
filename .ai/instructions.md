@@ -7,6 +7,7 @@
 - 2026-07-21: Publish this package from pushes to `main` with GitHub Actions, .NET 10, package version `0.0.${{ github.run_number }}`, and the `NUGET_API_KEY` repository secret; build and pack the library project directly because the package contains only the library.
 - 2026-07-21: Generate native `OpenAI.Responses.FunctionTool` definitions and bind `FunctionCallResponseItem` inputs; do not expose Chat Completions types because the package targets the Responses API.
 - 2026-07-21: The OpenAI 2.9.1 Responses API is marked experimental by the SDK; this package intentionally opts in by suppressing `OPENAI001` at its project boundary.
+- 2026-07-27: Keep the test project's direct OpenAI package reference aligned with the library package version to prevent NU1605/CS1705 assembly-version conflicts.
 - 2026-07-21: Verify the Responses-only contract with xUnit: generated `FunctionTool` values must fit `CreateResponseOptions`, and a `FunctionCallResponseItem` must produce a matching `FunctionCallOutputResponseItem`.
 - 2026-07-21: Keep class-level `ToolCategory` as a toolbox mechanism and assign cross-cutting categories only through each method's `ToolAttribute.Categories`; catalog lookup must include toolbox-contained and standalone functions alike.
 - 2026-07-21: Use `TripleG3.AI.Tools.AutoGeneration.slnx` as the repository solution; it includes the library and test projects for solution-level build and test validation.

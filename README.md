@@ -63,7 +63,7 @@ Both projections use the same function name, description, aliases, and generated
 
 The project targets `net10.0` and exposes types from `OpenAI.Responses`. Reference the project, or the package produced by your organization's distribution process, from the host application.
 
-OpenAI 2.9.1 marks its Responses API types with the `OPENAI001` experimental diagnostic. This package intentionally opts into that SDK surface. A host that directly uses `OpenAI.Responses` types must also suppress `OPENAI001` when its build configuration requires it.
+OpenAI 2.12.0 marks its Responses API types with the `OPENAI001` experimental diagnostic. This package intentionally opts into that SDK surface. A host that directly uses `OpenAI.Responses` types must also suppress `OPENAI001` when its build configuration requires it.
 
 For a source-based reference, add the library project to the host project:
 
