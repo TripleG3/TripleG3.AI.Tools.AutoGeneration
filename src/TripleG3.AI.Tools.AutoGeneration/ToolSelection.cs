@@ -10,7 +10,7 @@ public sealed record ToolSelection
         bool includeToolboxSelectors)
     {
         IncludeAll = includeAll;
-        Categories = categories;
+        Categories = categories.ToImmutableHashSet(StringComparer.Ordinal);
         IncludeRequiredTools = includeRequiredTools;
         IncludeToolboxSelectors = includeToolboxSelectors;
     }

@@ -8,6 +8,9 @@
     <NoWarn>$(NoWarn);OPENAI001;OPENAI002</NoWarn>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Description>Host-neutral .NET tool discovery, versioned schemas, explicit execution bindings, and shared OpenAI Responses/Realtime contracts.</Description>
+    <RepositoryUrl>https://github.com/TripleG3/TripleG3.AI.Tools.AutoGeneration</RepositoryUrl>
+    <PackageReleaseNotes>Separate cached tool metadata from per-binding CIS state; add alternative handlers and portable descriptors; align strict argument/default/result wire contracts. See README migration guidance for intentional pre-1.0 changes.</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,7 +19,7 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
     <PackageReference Include="OpenAI" Version="2.12.0" />
-    <PackageReference Include="TripleG3.Cis" Version="0.0.1" />
+    <PackageReference Include="TripleG3.Cis" Version="0.0.7" />
   </ItemGroup>
 
 </Project>

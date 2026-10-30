@@ -15,7 +15,10 @@ public sealed class ToolSet
             StringComparer.Ordinal);
     }
 
-    public IReadOnlyList<GeneratedTool> Tools => _tools;
+    public IReadOnlyList<GeneratedTool> Tools => Array.AsReadOnly(_tools);
+
+    public ImmutableArray<ToolDescriptor> DescribeTools(ToolResultFormat format = ToolResultFormat.Automatic) =>
+        [.. _tools.Select(tool => tool.Describe(format))];
 
     public GeneratedTool[] CreateTools() => [.. _tools];
 

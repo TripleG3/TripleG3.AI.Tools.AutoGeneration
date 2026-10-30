@@ -4,6 +4,11 @@
 
 The library does not run a Responses API loop, enforce authorization, or know how an application creates tool-target instances. The host application owns those concerns. This separation makes the package suitable for web applications, workers, console applications, and agent hosts.
 
+`GeneratedTool` is reusable metadata, not a shared execution service. Create a
+host-owned `ToolBinding` for each independently serialized target/session, or use
+the stateless convenience calls. Bind either a reflected target resolver or an
+explicit alternative handler; both use the same argument and result contract.
+
 ## Contents
 
 - [End-to-end flow](#end-to-end-flow)
@@ -17,7 +22,10 @@ The library does not run a Responses API loop, enforce authorization, or know ho
 - [Find tools by function category](#find-tools-by-function-category)
 - [Select tools for model profiles](#select-tools-for-model-profiles)
 - [Resolve targets and invoke calls](#resolve-targets-and-invoke-calls)
+- [Bind alternative implementations](#bind-alternative-implementations)
+- [Persist tool descriptors](#persist-tool-descriptors)
 - [Serialize results](#serialize-results)
+- [Migration from 0.0.7](#migration-from-007)
 - [Dependency injection](#dependency-injection)
 - [Implementation checklist](#implementation-checklist)
 - [License](#license)
@@ -30,7 +38,8 @@ The normal host flow is:
 2. Scan one or more explicitly selected assemblies with `ResponseToolDiscovery.CreateToolCatalog(...)`.
 3. Add each `GeneratedTool.ResponseTool` from `catalog.CreatePrimaryTools()` to `CreateResponseOptions.Tools`.
 4. When `ResponseResult.OutputItems` contains a `FunctionCallResponseItem`, locate the matching `GeneratedTool` by function name.
-5. Resolve an instance target for instance methods and invoke the generated tool.
+5. Resolve the selected definition's session binding and invoke it. The binding
+   resolves an instance target or invokes its explicitly supplied handler.
 6. Add the resulting `FunctionCallOutputResponseItem` to the next `CreateResponseOptions.InputItems`, correlated through `FunctionCallResponseItem.CallId`.
 7. Repeat the Responses API request flow until the model returns a final response.
 
@@ -58,6 +67,8 @@ RealtimeFunctionTool realtimeTool = generatedTool.ToRealtimeTool();
 ```
 
 Both projections use the same function name, description, aliases, and generated JSON parameter schema. Tool invocation remains host-owned: the Responses host resolves `FunctionCallResponseItem` values, while a Realtime host resolves `RealtimeFunctionCallItem` values and returns a matching realtime function-call-output item before starting a follow-up response.
+Projections are fresh SDK objects. Mutating a returned projection does not change
+the shared definition, its descriptor, or another consumer's projection.
 
 ## Requirements and reference
 
@@ -179,7 +190,7 @@ The library accepts synchronous return values, `Task`, `Task<T>`, `ValueTask`, a
 | `Tool(name, description, friendlyUIDescription, isManuallyRegistered: false)` | Method | Defines the model-visible function name and description. `friendlyUIDescription` is carried in invocation state for host UI or telemetry; it is not sent as the model's function description. |
 | `ToolAttribute.IsAlwaysAvailable` | `[Tool]` property | For a tool in a category, includes that tool in `PrimaryTools` in addition to the category selector. All uncategorized tools are already primary. |
 | `ToolAttribute.IsLongRunning` | `[Tool]` property | Preserved on `GeneratedTool` for host behavior or UI. It does not schedule, poll, or timeout work automatically. |
-| `ToolAttribute.SchemaVersion` | `[Tool]` property | Version metadata reported by a category descriptor. It does not alter generated JSON Schema. |
+| `ToolAttribute.SchemaVersion` | `[Tool]` property | Positive contract version exposed by every `GeneratedTool` and its portable descriptor. It does not alter generated JSON Schema. |
 | `ToolAttribute.Aliases` | `[Tool]` property | Creates an additional `FunctionTool` definition for every non-empty alias. Each alias invokes the same method. |
 | `ToolAttribute.Categories` | `[Tool]` property | Adds zero or more independent categories to this function. These do not come from, and are not inherited from, a class-level `ToolCategory` toolbox. |
 | `ToolAttribute.Replaces` | `[Tool]` property | Informational replacement metadata reported by a category descriptor. It does not redirect calls. |
@@ -215,7 +226,11 @@ public Task<string> GetWeatherAsync(string city, CancellationToken cancellationT
 	Task.FromResult(city);
 ```
 
-`isRequired: false` changes the advertised JSON Schema only. To make a missing value bind successfully at runtime, the C# parameter must also have a default value or be an optional parameter. A nullable reference type alone does not make an omitted argument optional.
+`isRequired: false` requires a usable C# parameter default. Discovery rejects
+optional metadata without that default. An explicit `isRequired: true` requires
+the caller to supply the argument even when the C# signature has a default.
+A nullable reference type permits JSON null; it does not make omission optional.
+Defaults are applied only to omitted arguments, never to overwrite explicit values.
 
 ## Generated parameter schema
 
@@ -238,12 +253,16 @@ The schema generator handles common .NET shapes as follows:
 | `IEnumerable<T>` or array | Array with an item schema for `T` |
 | `IDictionary<string, T>` / `IReadOnlyDictionary<string, T>` | Object with an `additionalProperties` schema for `T` |
 | Serializable object | Object schema built from its public properties |
+| `object`, `JsonElement`, `JsonNode` | Unconstrained JSON value, including arrays and primitives |
 
 Every generated schema includes the nonstandard `x-dotnet-type` extension so hosts and model tooling can retain the original .NET type. Nullable values are represented by allowing both the generated type and `null`.
 
 For object properties, the generator follows familiar `System.Text.Json` metadata including `JsonPropertyName`, `JsonIgnore`, `JsonInclude`, `JsonRequired`, `RequiredMember`, `JsonConstructor`, and `JsonExtensionData`. Use `JsonPropertyName` whenever a stable, explicit wire name matters.
 
-For enums, use ordinary C# enum member names as model call values. `JsonStringEnumMemberNameAttribute` changes the schema's displayed value, but argument binding currently resolves enum values by their C# member name. Keep the two names identical when a tool must be invoked automatically.
+`JsonStringEnumMemberNameAttribute` wire names are honored in schemas, input
+binding, defaults and results. Numeric enum input is rejected. Nullable enum
+schemas explicitly permit null. `BinaryData` uses base64 strings in both
+directions; `TimeSpan` uses invariant strings rather than numeric seconds.
 
 Use `ToolSchema` on types and public properties, rather than fields or top-level parameters, when you need descriptions to appear in generated input schema.
 
@@ -405,7 +424,10 @@ Category selection uses a union: `ForCategories("A", "B")` selects tools in `A` 
 
 ## Resolve targets and invoke calls
 
-`FunctionCallResponseItem` values arrive in `ResponseResult.OutputItems`. Resolve them through the catalog, then invoke the corresponding `GeneratedTool`. The following helper is suitable for a Responses API tool-call loop:
+`FunctionCallResponseItem` values arrive in `ResponseResult.OutputItems`. Resolve
+them through the assigned `ToolSet`, not the entire catalog. The following
+one-shot helper creates a temporary binding; retain a binding at the host's
+session scope when repeated calls to one target should serialize:
 
 ```csharp
 using OpenAI.Responses;
@@ -414,33 +436,50 @@ using TripleG3.AI.Tools.AutoGeneration;
 public static class ResponseToolCallExecutor
 {
 	public static async Task<FunctionCallOutputResponseItem> ExecuteAsync(
-		GeneratedToolCatalog catalog,
+		ToolSet assignedTools,
 		FunctionCallResponseItem call,
 		ToolTargetResolver targetResolver,
 		CancellationToken cancellationToken)
 	{
-		if (!catalog.TryGetTool(call.FunctionName, out GeneratedTool tool))
+		if (!assignedTools.TryGetTool(call.FunctionName, out GeneratedTool tool))
 		{
 			throw new InvalidOperationException($"The model called unknown tool '{call.FunctionName}'.");
 		}
 
-		object? target = await targetResolver(tool, call, cancellationToken);
-		return await tool.InvokeAndCreateFunctionCallOutputAsync(call, target, cancellationToken);
+		await using ToolBinding binding = tool.Bind(targetResolver);
+		ToolInvocationResult result = await binding.InvokeAsync(
+			new ToolCall(call.FunctionName, call.CallId, call.FunctionArguments.ToString()),
+			cancellationToken);
+		return ResponseItem.CreateFunctionCallOutputItem(call.CallId, result.SerializedResult);
 	}
 }
 ```
 
 `GeneratedTool.InvokeAsync(...)` binds the JSON object in `FunctionCallResponseItem.FunctionArguments` to the method parameters. `GeneratedTool.InvokeAndCreateFunctionCallOutputAsync(...)` adds the normal Responses API result step by returning a `FunctionCallOutputResponseItem` linked to `FunctionCallResponseItem.CallId`. It:
 
-- Rejects calls whose function name is neither the declared tool name nor an alias.
+- Requires the exact selected function name. Aliases have their own discovered definitions.
 - Requires a JSON object for arguments.
+- Rejects duplicate properties, unknown properties, wrong-case wire names, missing
+  required values, and schema/type/nullability mismatches before invoking handlers.
 - Uses parameter-level metadata first, then matching method-level metadata.
-- Applies C# default values and optional parameters when an argument is absent.
+- Applies usable C# defaults when an optional argument is absent.
 - Injects the supplied cancellation token into the trailing `CancellationToken` parameter.
 - Converts primitives, object graphs, `JsonElement`, `JsonNode`, `BinaryData`, enums, collections, and dictionaries with `System.Text.Json`.
 - Unwraps `TargetInvocationException` so application exceptions retain their original type.
 
-The lower-level invocation method returns a state object rather than the result directly. When using `InvokeAsync(...)`, call `GeneratedTool.GetReadyInvocationValueOrThrow(...)` before reading `ToolInvocationState.Result`; it turns failed or non-ready invocation states into a `ToolInvocationException`.
+`ToolBinding.InvokeAsync(ToolCall, token)` returns `ToolInvocationResult`, including
+the typed result, serialized result, canonical effective argument JSON, and
+invocation snapshot. Domain exceptions and cooperative cancellation propagate
+with their original types; binding state also reports an error for a failed
+transition. Bindings serialize their own invocations but never serialize other
+bindings that happen to share the definition.
+
+`GeneratedTool.InvokeAsync(ToolCall, ...)` and the Responses convenience overloads
+use temporary bindings and retain no state on the definition. The overload
+accepting `FunctionCallResponseItem` still returns a completed `State<ToolInvocationState>`
+on success. Failures now throw instead of being hidden in a non-ready result.
+`GetReadyInvocationValueOrThrow` remains available for reading externally supplied
+state values.
 
 For each function output, create the next Responses request with the previous response ID and the output item:
 
@@ -470,7 +509,7 @@ For a dependency-injected host, resolve targets from the service provider that o
 ```csharp
 ToolTargetResolver targetResolver = ToolTargetResolvers.FromServiceProvider(serviceProvider);
 FunctionCallOutputResponseItem functionOutput = await ResponseToolCallExecutor.ExecuteAsync(
-	catalog,
+	assignedTools,
 	toolCall,
 	targetResolver,
 	cancellationToken);
@@ -479,6 +518,71 @@ FunctionCallOutputResponseItem functionOutput = await ResponseToolCallExecutor.E
 ```
 
 The package deliberately does not authorize calls. Validate user identity, tenant boundaries, resource ownership, and side-effect permissions inside the resolver and/or tool implementation before performing work.
+
+### Bind alternative implementations
+
+An alternative handler replaces the entire invocation, including a static
+method. It never resolves or falls back to the original target:
+
+```csharp
+await using ToolBinding binding = generatedTool.BindHandler(
+	(call, arguments, cancellationToken) =>
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		string city = arguments.Get<string>("city");
+		// Return the same declared result type as the original tool.
+		return ValueTask.FromResult<object?>(city);
+	},
+	ToolResultFormat.Plain);
+
+ToolInvocationResult result = await binding.InvokeAsync(
+	new ToolCall(generatedTool.Name, "call-1", "{\"city\":\"Paris\"}"),
+	cancellationToken);
+```
+
+Use the handler for an adapter, fixture, recorder, or simulated implementation.
+The host owns any resources it captures. Binding disposal cancels and drains
+pending invocations and clears invocation state and handler references; it does
+not dispose borrowed DI targets or undo external side effects. Implementations
+must honor cancellation. Do not synchronously wait for disposal from inside
+the binding's own handler or state observer.
+
+`ToolArgumentBinder.Bind(tool, call, token)` and the existing `ToParameters`
+extensions can also be used without invoking the production method.
+`ToolArguments.Values` exposes per-invocation converted values; contained DTOs
+belong to that call and should not be shared between concurrent calls.
+`EffectiveArgumentsJson` records exactly the selected parameters with defaults
+applied; it excludes the injected cancellation token.
+
+Environment defaults (device identity, clocks, resource roots, connection
+configuration) remain injected target/handler dependencies. The package does
+not silently merge them into model arguments.
+
+### Persist tool descriptors
+
+`GeneratedTool.Descriptor` and `Describe(format)` return a JSON-serializable
+`ToolDescriptor`. Catalogs and tool sets expose `DescribeTools(format)`.
+Descriptors contain the selected name/description, schema version, parameter
+schema (including declared defaults), result schema, actual output-wire schema,
+effective result format and a deterministic SHA-256 fingerprint.
+
+```csharp
+string json = JsonSerializer.Serialize(tool.Descriptor, ToolJsonSerialization.Options);
+ToolDescriptor expected = JsonSerializer.Deserialize<ToolDescriptor>(
+	json, ToolJsonSerialization.Options)!;
+expected.RequireMatch(tool.Descriptor);
+```
+
+Persist the descriptor and a host-defined binding identifier, not `GeneratedTool`,
+`MethodInfo`, service instances or credentials. A descriptor cannot load code,
+grant permission or invoke anything. The fingerprint detects contract changes;
+it is not a signature or authorization token. Increment `SchemaVersion` when
+the intended contract changes and requalify downstream assumptions.
+
+Catalog discovery rejects conflicting names/aliases instead of silently selecting
+the first method. Repeating the exact same definition reference is harmless.
+Catalog collections are read-only, and failed assembly type loading is surfaced
+rather than silently omitting capabilities.
 
 ## Serialize results
 
@@ -499,7 +603,48 @@ Use `GeneratedTool.SerializeResult(result)` after invocation. It selects the ann
 
 The actual `schema` contains the full generated result schema and `result` contains the serialized value. This is particularly useful when an AI model needs both data and a model-readable description of the data shape.
 
-The result serializer uses standard `System.Text.Json` defaults with string enums. The input-schema generator uses web-style property naming. Apply `JsonPropertyName` to result properties, as shown in the example, when the result wire names must exactly match the advertised schema.
+Schema generation, argument conversion and output serialization use the same
+read-only `ToolJsonSerialization.Options`: camel-case properties, explicit
+`JsonPropertyName` overrides, string enum wire names, base64 binary values,
+required constructor members and nullable annotations.
+
+`ToolResultFormat.Automatic` preserves metadata-driven envelopes. Choose
+`Plain` or `SchemaEnvelope` explicitly on a binding or `SerializeResult` to use
+another documented output shape. Use the same format for production and
+alternative handlers; it is included in the descriptor fingerprint.
+Alternative results must be assignable to the original declared return type
+and satisfy the generated output schema.
+
+The validator covers the schema subset generated by this package; it is not
+a general JSON Schema or domain-policy engine. Cyclic/untyped shapes remain
+permissive at their recursion boundary. Business constraints and any custom
+schemas/converters outside the documented contract require host validation.
+
+## Migration from 0.0.7
+
+This is an intentional pre-1.0 API/wire-contract change:
+
+- `GeneratedTool` no longer inherits `StateService<ToolInvocationState>`.
+  Move state subscriptions and per-target serialization to a host-owned
+  `ToolBinding`. Do not cache bindings globally with definitions.
+- SDK projections are fresh objects, not shared mutable catalog instances.
+- Result property names now match the camel-case schema (unless explicitly
+  named). Use `ToolResultFormat` deliberately; do not assume annotated results
+  are plain DTO JSON.
+- Argument names are case-sensitive; duplicates, unknown fields, missing
+  required values and non-nullable nulls fail before execution.
+- Enum wire names and BinaryData base64 semantics now match their schemas.
+  Numeric TimeSpan and numeric enum inputs are not accepted.
+- Optional metadata without a usable declaration default, conflicting tool
+  names, and unsupported method signatures fail discovery.
+- Convenience invocations throw failures/cancellation rather than returning
+  error-shaped state. The success return signatures remain available.
+- The minimum `TripleG3.Cis` version is now `0.0.7`. OpenAI remains `2.12.0`.
+
+Existing persisted tool fingerprints or result consumers must be reviewed
+before upgrading. Publish only after the package tests and representative
+consumer contract tests pass. The existing workflow continues to publish
+`0.0.<run_number>` on pushes to `main`; local packs are not proof of publication.
 
 ## Dependency injection
 
@@ -537,7 +682,7 @@ Before exposing a new application method as a tool, verify all of the following:
 6. Result DTOs use `ToolResult` and explicit `JsonPropertyName` values when the model benefits from a self-describing response.
 7. Instance tool types are registered in DI or handled by a custom `ToolTargetResolver`.
 8. Cross-cutting categories are assigned on each `[Tool]` through `Categories`, not on the containing toolbox type.
-9. The host scans only intended assemblies and resolves calls exclusively with `GeneratedToolCatalog.TryGetTool(...)`.
+9. The host scans only intended assemblies and resolves calls exclusively with the assigned `ToolSet.TryGetTool(...)`.
 10. The host checks authorization and validates any domain-specific constraints before executing side effects.
 11. The host returns a `FunctionCallOutputResponseItem` using the model call's `CallId`, then continues its Responses API loop.
 

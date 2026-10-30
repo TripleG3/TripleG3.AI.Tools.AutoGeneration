@@ -12,9 +12,11 @@ public static class ToolEnumSchemaMetadata
         if (!type.IsEnum) throw new ArgumentException("The supplied type must be an enum type.", nameof(enumType));
         JsonArray values = [];
         JsonObject descriptions = [];
+        HashSet<string> names = new(StringComparer.Ordinal);
         foreach (string name in Enum.GetNames(type))
         {
             string wireName = GetWireName(type, name);
+            if (!names.Add(wireName)) throw new InvalidOperationException($"Enum '{type}' contains duplicate wire name '{wireName}'.");
             values.Add(wireName);
             if (GetDescription(type, name) is { } description) descriptions[wireName] = description;
         }
@@ -38,7 +40,7 @@ public static class ToolEnumSchemaMetadata
 
 public static class ToolJsonSchemaBuilder
 {
-    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: false) } };
+    private static JsonSerializerOptions Options => ToolJsonSerialization.Options;
 
     public static NullabilityInfo CreateNullabilityInfo(ParameterInfo parameter) => new NullabilityInfoContext().Create(parameter);
     public static JsonObject CreateParameterTypeSchema(Type type, NullabilityInfo? nullability = null) => CreateSchema(type, null, nullability, []);
@@ -48,10 +50,11 @@ public static class ToolJsonSchemaBuilder
         schema["default"] = defaultValue is null ? null : JsonSerializer.SerializeToNode(defaultValue, defaultValue.GetType(), Options);
     }
 
-    internal static JsonObject CreateSchema(Type declaredType, MemberInfo? member, NullabilityInfo? nullability, HashSet<Type> visited)
+    internal static JsonObject CreateSchema(Type declaredType, MemberInfo? member, NullabilityInfo? nullability, HashSet<Type> visited, bool output = false)
     {
         Type type = Nullable.GetUnderlyingType(declaredType) ?? declaredType;
-        JsonObject schema = type == typeof(string) || type == typeof(char) || type == typeof(TimeOnly) || type == typeof(TimeSpan) ? new() { ["type"] = "string" }
+        JsonObject schema = type == typeof(object) || type == typeof(JsonElement) || typeof(JsonNode).IsAssignableFrom(type) ? new()
+            : type == typeof(string) || type == typeof(char) || type == typeof(TimeOnly) || type == typeof(TimeSpan) ? new() { ["type"] = "string" }
             : type == typeof(bool) ? new() { ["type"] = "boolean" }
             : IsInteger(type) ? new() { ["type"] = "integer" }
             : IsNumber(type) ? new() { ["type"] = "number" }
@@ -61,9 +64,9 @@ public static class ToolJsonSchemaBuilder
             : type == typeof(Uri) ? new() { ["type"] = "string", ["format"] = "uri" }
             : type == typeof(byte[]) || type == typeof(BinaryData) ? new() { ["type"] = "string", ["contentEncoding"] = "base64" }
             : type.IsEnum ? ToolEnumSchemaMetadata.CreateEnumSchema(type)
-            : TryDictionary(type, out Type? value) ? new() { ["type"] = "object", ["additionalProperties"] = CreateSchema(value, null, null, visited) }
-            : TryEnumerable(type, out Type? item) ? new() { ["type"] = "array", ["items"] = CreateSchema(item, null, null, visited) }
-            : CreateObjectSchema(type, visited);
+            : TryDictionary(type, out Type? value) ? new() { ["type"] = "object", ["additionalProperties"] = CreateSchema(value, null, nullability?.GenericTypeArguments.LastOrDefault(), visited, output) }
+            : TryEnumerable(type, out Type? item) ? new() { ["type"] = "array", ["items"] = CreateSchema(item, null, nullability?.ElementType ?? nullability?.GenericTypeArguments.FirstOrDefault(), visited, output) }
+            : CreateObjectSchema(type, visited, output);
         schema["x-dotnet-type"] = FormatType(declaredType);
         string? description = member?.GetCustomAttribute<ToolSchemaAttribute>(true)?.Description ?? member?.GetCustomAttribute<ToolResultAttribute>(true)?.Description ?? type.GetCustomAttribute<ToolSchemaAttribute>(true)?.Description ?? type.GetCustomAttribute<ToolResultAttribute>(true)?.Description;
         string? enumDescription = ToolEnumSchemaMetadata.CreateEnumValueDescription(type);
@@ -72,11 +75,12 @@ public static class ToolJsonSchemaBuilder
         if (Nullable.GetUnderlyingType(declaredType) is not null || nullability?.ReadState == NullabilityState.Nullable)
         {
             if (schema["type"] is JsonValue typeValue && typeValue.TryGetValue<string>(out string? typeName) && typeName is not "null") schema["type"] = new JsonArray(typeName, "null");
+            if (schema["enum"] is JsonArray enumValues) enumValues.Add((JsonNode?)null);
         }
         return schema;
     }
 
-    private static JsonObject CreateObjectSchema(Type type, HashSet<Type> visited)
+    private static JsonObject CreateObjectSchema(Type type, HashSet<Type> visited, bool output)
     {
         JsonObject schema = new() { ["type"] = "object" };
         if (type == typeof(object) || type == typeof(JsonElement) || typeof(JsonNode).IsAssignableFrom(type)) { schema["additionalProperties"] = true; return schema; }
@@ -89,10 +93,11 @@ public static class ToolJsonSchemaBuilder
                 JsonIgnoreAttribute? ignored = property.GetCustomAttribute<JsonIgnoreAttribute>(true);
                 if (property.GetMethod is null || property.GetIndexParameters().Length > 0 || ignored?.Condition == JsonIgnoreCondition.Always) continue;
                 bool constructorBound = type.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Where(constructor => constructor.IsPublic || constructor.GetCustomAttribute<JsonConstructorAttribute>(true) is not null).SelectMany(constructor => constructor.GetParameters()).Any(parameter => string.Equals(parameter.Name, property.Name, StringComparison.OrdinalIgnoreCase) || string.Equals(parameter.Name, GetName(property), StringComparison.OrdinalIgnoreCase));
-                if (property.SetMethod is null && property.GetCustomAttribute<JsonIncludeAttribute>(true) is null && !constructorBound) continue;
+                if (!output && property.SetMethod is null && property.GetCustomAttribute<JsonIncludeAttribute>(true) is null && !constructorBound) continue;
                 if (property.GetCustomAttribute<JsonExtensionDataAttribute>(true) is not null) { extensionData = true; continue; }
                 string name = GetName(property); NullabilityInfo info = new NullabilityInfoContext().Create(property);
-                properties[name] = CreateSchema(property.PropertyType, property, info, visited);
+                if (properties.ContainsKey(name)) throw new InvalidOperationException($"Type '{type}' has duplicate wire property '{name}'.");
+                properties[name] = CreateSchema(property.PropertyType, property, info, visited, output);
                 bool constructorOptional = type.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                     .Where(constructor => constructor.IsPublic || constructor.GetCustomAttribute<JsonConstructorAttribute>(true) is not null)
                     .SelectMany(constructor => constructor.GetParameters())

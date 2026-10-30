@@ -1,6 +1,4 @@
-using System.Text.Json;
 using OpenAI.Realtime;
-using OpenAI.Responses;
 
 namespace TripleG3.AI.Tools.AutoGeneration.Tests;
 
@@ -90,7 +88,7 @@ public sealed class ResponseToolDiscoveryTests
         FunctionTool responsesTool = generatedTool.ToResponsesTool();
         RealtimeFunctionTool realtimeTool = generatedTool.ToRealtimeTool();
 
-        Assert.Same(generatedTool.ResponseTool, responsesTool);
+        Assert.NotSame(generatedTool.ResponseTool, responsesTool);
         Assert.Equal(responsesTool.FunctionName, realtimeTool.FunctionName);
         Assert.Equal(responsesTool.FunctionDescription, realtimeTool.FunctionDescription);
         Assert.Equal(responsesTool.FunctionParameters.ToString(), realtimeTool.FunctionParameters.ToString());

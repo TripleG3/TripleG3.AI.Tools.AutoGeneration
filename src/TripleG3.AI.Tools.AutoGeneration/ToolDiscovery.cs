@@ -9,9 +9,36 @@ public sealed class GeneratedToolCatalog
     private readonly GeneratedTool[] _primaryTools; private readonly GeneratedTool[] _allTools; private readonly GeneratedTool[] _requiredTools; private readonly GeneratedToolCategory[] _categories; private readonly Dictionary<string, GeneratedTool> _tools; private readonly Dictionary<string, GeneratedTool[]> _toolsByCategory; private readonly string[] _categoryNames;
     public GeneratedToolCatalog(IEnumerable<GeneratedTool> primaryTools, IEnumerable<GeneratedToolCategory> categories)
     {
-        _primaryTools = [.. primaryTools]; _categories = [.. categories]; _allTools = [.. _primaryTools.Concat(_categories.SelectMany(category => category.Tools)).DistinctBy(tool => tool.ResponseTool.FunctionName)]; _requiredTools = [.. _allTools.Where(tool => tool.IsRequired)]; _tools = _allTools.ToDictionary(tool => tool.ResponseTool.FunctionName, StringComparer.Ordinal); IGrouping<string, (string CategoryName, GeneratedTool Tool)>[] categoryGroups = [.. _allTools.SelectMany(tool => tool.CategoryNames.Select(categoryName => (CategoryName: categoryName, Tool: tool))).GroupBy(item => item.CategoryName, StringComparer.Ordinal)]; _categoryNames = [.. categoryGroups.Select(group => group.Key)]; _toolsByCategory = categoryGroups.ToDictionary(group => group.Key, group => group.Select(item => item.Tool).ToArray(), StringComparer.Ordinal);
+        ArgumentNullException.ThrowIfNull(primaryTools);
+        ArgumentNullException.ThrowIfNull(categories);
+        _primaryTools = DistinctContracts(primaryTools);
+        _categories = [.. categories];
+        _allTools = DistinctContracts(_primaryTools.Concat(_categories.SelectMany(category => category.Tools)));
+        _requiredTools = [.. _allTools.Where(tool => tool.IsRequired)];
+        _tools = _allTools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
+        IGrouping<string, (string CategoryName, GeneratedTool Tool)>[] categoryGroups = [.. _allTools.SelectMany(tool => tool.CategoryNames.Select(categoryName => (CategoryName: categoryName, Tool: tool))).GroupBy(item => item.CategoryName, StringComparer.Ordinal)];
+        _categoryNames = [.. categoryGroups.Select(group => group.Key)];
+        _toolsByCategory = categoryGroups.ToDictionary(group => group.Key, group => group.Select(item => item.Tool).ToArray(), StringComparer.Ordinal);
     }
-    public static GeneratedToolCatalog Empty { get; } = new([], []); public IReadOnlyList<GeneratedTool> PrimaryTools => _primaryTools; public IReadOnlyList<GeneratedTool> AllTools => _allTools; public IReadOnlyList<GeneratedTool> RequiredTools => _requiredTools; public IReadOnlyList<GeneratedToolCategory> Categories => _categories; public IReadOnlyList<string> CategoryNames => _categoryNames;
+    public static GeneratedToolCatalog Empty { get; } = new([], []); public IReadOnlyList<GeneratedTool> PrimaryTools => Array.AsReadOnly(_primaryTools); public IReadOnlyList<GeneratedTool> AllTools => Array.AsReadOnly(_allTools); public IReadOnlyList<GeneratedTool> RequiredTools => Array.AsReadOnly(_requiredTools); public IReadOnlyList<GeneratedToolCategory> Categories => Array.AsReadOnly(_categories); public IReadOnlyList<string> CategoryNames => Array.AsReadOnly(_categoryNames);
+    public ImmutableArray<ToolDescriptor> DescribeTools(ToolResultFormat format = ToolResultFormat.Automatic) =>
+        [.. _allTools.Select(tool => tool.Describe(format))];
+
+    private static GeneratedTool[] DistinctContracts(IEnumerable<GeneratedTool> tools)
+    {
+        Dictionary<string, GeneratedTool> names = new(StringComparer.Ordinal);
+        foreach (GeneratedTool tool in tools)
+        {
+            ArgumentNullException.ThrowIfNull(tool);
+            if (names.TryGetValue(tool.Name, out GeneratedTool? existing))
+            {
+                if (!ReferenceEquals(existing, tool))
+                    throw new InvalidOperationException($"Conflicting tool name or alias '{tool.Name}': '{existing.MethodInfo.DeclaringType}.{existing.MethodInfo.Name}' and '{tool.MethodInfo.DeclaringType}.{tool.MethodInfo.Name}'.");
+            }
+            else names.Add(tool.Name, tool);
+        }
+        return [.. names.Values];
+    }
     public ToolSet SelectTools(ToolSelection selection)
     {
         ArgumentNullException.ThrowIfNull(selection);
@@ -31,12 +58,12 @@ public sealed class GeneratedToolCatalog
 
     public ToolSet SelectTools(params string[] categories) => SelectTools(ToolSelection.ForCategories(categories));
 
-    public GeneratedTool[] CreatePrimaryTools() => [.. _primaryTools]; public GeneratedTool[] CreateAllTools() => [.. _allTools]; public FunctionTool[] CreatePrimaryResponsesTools() => [.. _primaryTools.Select(tool => tool.ToResponsesTool())]; public FunctionTool[] CreateAllResponsesTools() => [.. _allTools.Select(tool => tool.ToResponsesTool())]; public RealtimeFunctionTool[] CreatePrimaryRealtimeTools() => [.. _primaryTools.Select(tool => tool.ToRealtimeTool())]; public RealtimeFunctionTool[] CreateAllRealtimeTools() => [.. _allTools.Select(tool => tool.ToRealtimeTool())]; public GeneratedTool[] CreateToolsForCategory(string categoryName) => _toolsByCategory.TryGetValue(NormalizeCategoryName(categoryName), out GeneratedTool[]? tools) && tools is not null ? [.. tools] : []; public bool TryGetTool(string name, out GeneratedTool tool) => _tools.TryGetValue(name, out tool!); public bool TryGetToolsForCategory(string categoryName, out IReadOnlyList<GeneratedTool> tools) { if (_toolsByCategory.TryGetValue(NormalizeCategoryName(categoryName), out GeneratedTool[]? categoryTools) && categoryTools is not null) { tools = categoryTools; return true; } tools = []; return false; } public bool TryGetCategory(string name, out GeneratedToolCategory category) { category = _categories.FirstOrDefault(item => string.Equals(item.CategoryTool.ResponseTool.FunctionName, name, StringComparison.Ordinal))!; return category is not null; }
+    public GeneratedTool[] CreatePrimaryTools() => [.. _primaryTools]; public GeneratedTool[] CreateAllTools() => [.. _allTools]; public FunctionTool[] CreatePrimaryResponsesTools() => [.. _primaryTools.Select(tool => tool.ToResponsesTool())]; public FunctionTool[] CreateAllResponsesTools() => [.. _allTools.Select(tool => tool.ToResponsesTool())]; public RealtimeFunctionTool[] CreatePrimaryRealtimeTools() => [.. _primaryTools.Select(tool => tool.ToRealtimeTool())]; public RealtimeFunctionTool[] CreateAllRealtimeTools() => [.. _allTools.Select(tool => tool.ToRealtimeTool())]; public GeneratedTool[] CreateToolsForCategory(string categoryName) => _toolsByCategory.TryGetValue(NormalizeCategoryName(categoryName), out GeneratedTool[]? tools) && tools is not null ? [.. tools] : []; public bool TryGetTool(string name, out GeneratedTool tool) => _tools.TryGetValue(name, out tool!); public bool TryGetToolsForCategory(string categoryName, out IReadOnlyList<GeneratedTool> tools) { if (_toolsByCategory.TryGetValue(NormalizeCategoryName(categoryName), out GeneratedTool[]? categoryTools) && categoryTools is not null) { tools = Array.AsReadOnly(categoryTools); return true; } tools = []; return false; } public bool TryGetCategory(string name, out GeneratedToolCategory category) { category = _categories.FirstOrDefault(item => string.Equals(item.CategoryTool.ResponseTool.FunctionName, name, StringComparison.Ordinal))!; return category is not null; }
     private static string NormalizeCategoryName(string categoryName) { ArgumentException.ThrowIfNullOrWhiteSpace(categoryName); return categoryName.Trim(); }
 }
 
 public sealed class GeneratedToolCategory(string name, string description, GeneratedTool categoryTool, IEnumerable<GeneratedTool> tools)
-{ private readonly GeneratedTool[] _tools = [.. tools]; public string Name { get; } = name; public string Description { get; } = description; public GeneratedTool CategoryTool { get; } = categoryTool; public IReadOnlyList<GeneratedTool> Tools => _tools; public GeneratedTool[] CreateTools() => [.. _tools]; }
+{ private readonly GeneratedTool[] _tools = [.. tools]; public string Name { get; } = name; public string Description { get; } = description; public GeneratedTool CategoryTool { get; } = categoryTool; public IReadOnlyList<GeneratedTool> Tools => Array.AsReadOnly(_tools); public GeneratedTool[] CreateTools() => [.. _tools]; }
 
 public static class ToolCategoryBuilder
 {
@@ -78,7 +105,7 @@ public static class ResponseToolDiscovery
         }
         return new GeneratedToolCatalog(primary, categories);
     }
-    private static IEnumerable<Type> GetTypes(Assembly assembly) { try { return assembly.GetTypes(); } catch (ReflectionTypeLoadException exception) { return exception.Types.OfType<Type>(); } }
+    private static IEnumerable<Type> GetTypes(Assembly assembly) => assembly.GetTypes();
     private static IReadOnlyList<GeneratedTool> CreateTools(Delegate @delegate)
     {
         ToolAttribute tool = @delegate.Method.GetCustomAttribute<ToolAttribute>() ?? throw new ArgumentException("The delegate method is not decorated with ToolAttribute.", nameof(@delegate)); if (tool.IsDeprecated) return []; GeneratedTool primary = CreateTool(@delegate.Method.DeclaringType, @delegate.Method, tool, @delegate.Target, null); return [primary, .. CreateAliases(primary, tool)];
@@ -87,11 +114,35 @@ public static class ResponseToolDiscovery
     private static GeneratedTool CreateTool(Type? type, MethodInfo method, ToolAttribute tool, object? instance, ToolCategoryAttribute? category) => new(CreateFunction(method, tool), method.IsStatic ? null : type, method, instance, method.IsDefined(typeof(ToolRequiredAttribute), true), tool.IsLongRunning, tool.IsAlwaysAvailable, false, category?.Name, category?.Description, null, tool.FriendlyUIDescription, CreateCategoryNames(tool));
     private static IReadOnlyList<GeneratedTool> CreateAliases(GeneratedTool primary, ToolAttribute attribute) => [.. (attribute.Aliases ?? []).Where(alias => !string.IsNullOrWhiteSpace(alias) && !string.Equals(alias, primary.ResponseTool.FunctionName, StringComparison.Ordinal)).Distinct(StringComparer.Ordinal).Select(alias => new GeneratedTool(ResponseTool.CreateFunctionTool(alias, primary.ResponseTool.FunctionParameters, false, primary.ResponseTool.FunctionDescription), primary.TargetType, primary.MethodInfo, primary.TargetInstance, primary.IsRequired, primary.IsLongRunning, primary.IsAlwaysAvailable, primary.IsCategoryTool, primary.CategoryName, primary.CategoryDescription, primary.CategoryTools, primary.FriendlyUIDescription, primary.CategoryNames))];
     private static GeneratedTool CreateCategoryTool(ToolCategoryAttribute category, IReadOnlyList<GeneratedTool> tools) => new(ResponseTool.CreateFunctionTool(category.Name, BinaryData.FromString("{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}"), false, $"{category.Description} Calling this tool returns an array of tools related to this category."), null, ToolCategoryBuilder.CategoryToolMethod, null, false, false, false, true, category.Name, category.Description, tools);
-    private static FunctionTool CreateFunction(MethodInfo method, ToolAttribute tool)
+    private static FunctionTool CreateFunction(MethodInfo method, ToolAttribute tool) =>
+        ResponseTool.CreateFunctionTool(tool.Name, BinaryData.FromString(CreateParameterSchema(method).ToJsonString()), false, tool.Description);
+
+    internal static JsonObject CreateParameterSchema(MethodInfo method)
     {
+        if (method == ToolCategoryBuilder.CategoryToolMethod)
+            return new() { ["type"] = "object", ["properties"] = new JsonObject(), ["required"] = new JsonArray(), ["additionalProperties"] = false };
+        GeneratedTool.ValidateMethod(method, category: false);
         JsonObject properties = []; JsonArray required = []; ToolParameterAttribute[] methodAttributes = [.. method.GetCustomAttributes<ToolParameterAttribute>(true)];
-        foreach (ParameterInfo parameter in method.GetParameters()) { if (ToolParameterMetadata.Skip(parameter)) continue; ToolParameterAttribute? attribute = ToolParameterMetadata.GetAttribute(methodAttributes, parameter); string name = ToolParameterMetadata.GetName(parameter, attribute); if (properties.ContainsKey(name)) throw new InvalidOperationException($"Tool method '{method.DeclaringType?.FullName}.{method.Name}' defines the parameter '{name}' more than once."); Type schemaType = ToolParameterMetadata.GetSchemaType(parameter, attribute); JsonObject schema = ToolJsonSchemaBuilder.CreateParameterTypeSchema(schemaType, ToolJsonSchemaBuilder.CreateNullabilityInfo(parameter)); string? description = ToolJsonSchemaBuilder.Join(attribute?.Description, ToolEnumSchemaMetadata.CreateEnumValueDescription(schemaType)); if (!string.IsNullOrWhiteSpace(description)) schema["description"] = description; if (parameter.HasDefaultValue) ToolJsonSchemaBuilder.AddDefaultValue(schema, schemaType, parameter.DefaultValue); properties[name] = schema; if (attribute?.IsRequired ?? !parameter.HasDefaultValue) required.Add(name); }
-        return ResponseTool.CreateFunctionTool(tool.Name, BinaryData.FromString(new JsonObject { ["type"] = "object", ["properties"] = properties, ["required"] = required, ["additionalProperties"] = false }.ToJsonString()), false, tool.Description);
+        foreach (ParameterInfo parameter in method.GetParameters())
+        {
+            if (ToolParameterMetadata.Skip(parameter)) continue;
+            ToolParameterAttribute? attribute = ToolParameterMetadata.GetAttribute(methodAttributes, parameter);
+            string name = ToolParameterMetadata.GetName(parameter, attribute);
+            if (properties.ContainsKey(name)) throw new InvalidOperationException($"Tool method '{method.Name}' defines duplicate parameter '{name}'.");
+            Type schemaType = ToolParameterMetadata.GetSchemaType(parameter, attribute);
+            if (!parameter.ParameterType.IsAssignableFrom(schemaType))
+                throw new InvalidOperationException($"Schema type '{schemaType}' cannot bind to parameter '{name}' of type '{parameter.ParameterType}'.");
+            bool isRequired = attribute?.IsRequired ?? !parameter.HasDefaultValue;
+            if (!isRequired && (!parameter.HasDefaultValue || parameter.DefaultValue is DBNull || ReferenceEquals(parameter.DefaultValue, Type.Missing)))
+                throw new InvalidOperationException($"Optional tool parameter '{name}' must declare a usable C# default value.");
+            JsonObject schema = ToolJsonSchemaBuilder.CreateParameterTypeSchema(schemaType, ToolJsonSchemaBuilder.CreateNullabilityInfo(parameter));
+            string? description = ToolJsonSchemaBuilder.Join(attribute?.Description, ToolEnumSchemaMetadata.CreateEnumValueDescription(schemaType));
+            if (!string.IsNullOrWhiteSpace(description)) schema["description"] = description;
+            if (parameter.HasDefaultValue) ToolJsonSchemaBuilder.AddDefaultValue(schema, schemaType, parameter.DefaultValue);
+            properties[name] = schema;
+            if (isRequired) required.Add(name);
+        }
+        return new() { ["type"] = "object", ["properties"] = properties, ["required"] = required, ["additionalProperties"] = false };
     }
     private static string[] CreateCategoryNames(ToolAttribute tool) => [.. (tool.Categories ?? []).Where(categoryName => !string.IsNullOrWhiteSpace(categoryName)).Select(categoryName => categoryName!.Trim()).Distinct(StringComparer.Ordinal)];
 }

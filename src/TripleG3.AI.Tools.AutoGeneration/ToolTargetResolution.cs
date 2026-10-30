@@ -20,6 +20,7 @@ public static class ToolTargetResolvers
         {
             ArgumentNullException.ThrowIfNull(tool);
             ArgumentNullException.ThrowIfNull(call);
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (tool.TargetInstance is not null)
             {
@@ -41,16 +42,23 @@ public static class ToolTargetResolvers
     public static ToolTargetResolver FromLookup(Func<GeneratedTool, FunctionCallResponseItem, object?> lookup)
     {
         ArgumentNullException.ThrowIfNull(lookup);
-        return (tool, call, cancellationToken) => ValueTask.FromResult(lookup(tool, call));
+        return (tool, call, cancellationToken) =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(lookup(tool, call));
+        };
     }
 
     private static ValueTask<object?> ResolveDefaultAsync(
         GeneratedTool tool,
         FunctionCallResponseItem call,
-        CancellationToken cancellationToken) =>
-        tool.TargetInstance is not null
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return tool.TargetInstance is not null
             ? ValueTask.FromResult<object?>(tool.TargetInstance)
             : tool.MethodInfo.IsStatic || tool.TargetType is null
                 ? ValueTask.FromResult<object?>(null)
                 : ValueTask.FromResult(Activator.CreateInstance(tool.TargetType));
+    }
 }

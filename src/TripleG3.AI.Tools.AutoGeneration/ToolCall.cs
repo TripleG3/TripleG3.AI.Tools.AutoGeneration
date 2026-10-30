@@ -24,4 +24,7 @@ public sealed record ToolInvocationResult(
     string ToolName,
     object? Result,
     string SerializedResult,
-    ToolInvocationState State);
+    ToolInvocationState State)
+{
+    public string EffectiveArgumentsJson { get; init; } = "{}";
+}
