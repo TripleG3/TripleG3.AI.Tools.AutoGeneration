@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,7 +20,12 @@ env:
 jobs:
   publish:
     name: Build, test, package, and publish
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout
@@ -62,9 +68,15 @@ jobs:
           /p:RepositoryCommit=${{ github.sha }}
           /p:ContinuousIntegrationBuild=true
 
+      - name: Authenticate to NuGet with Trusted Publishing
+        id: nuget_login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       - name: Publish NuGet package
         run: >-
           dotnet nuget push ${{ env.PACKAGE_OUTPUT_PATH }}/*.nupkg
-          --api-key "${{ secrets.NUGET_API_KEY }}"
+          --api-key "${{ steps.nuget_login.outputs.NUGET_API_KEY }}"
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate

@@ -26,6 +26,7 @@ explicit alternative handler; both use the same argument and result contract.
 - [Persist tool descriptors](#persist-tool-descriptors)
 - [Serialize results](#serialize-results)
 - [Migration from 0.0.7](#migration-from-007)
+- [Publishing this package](#publishing-this-package)
 - [Dependency injection](#dependency-injection)
 - [Implementation checklist](#implementation-checklist)
 - [License](#license)
@@ -645,6 +646,46 @@ Existing persisted tool fingerprints or result consumers must be reviewed
 before upgrading. Publish only after the package tests and representative
 consumer contract tests pass. The existing workflow continues to publish
 `0.0.<run_number>` on pushes to `main`; local packs are not proof of publication.
+
+## Publishing this package
+
+The GitHub Actions workflow uses [NuGet Trusted Publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing)
+instead of a stored publishing API key. It builds and tests first, then the
+official `NuGet/login` action exchanges GitHub's OIDC token for a temporary
+NuGet API key immediately before pushing.
+
+Repository configuration:
+
+- GitHub environment: `nuget`, with deployment restricted to branch `main`.
+- Repository variable `NUGET_USER`: the owning **NuGet.org profile name**, not
+  a GitHub login or an email address.
+- Only the publishing job requests `id-token: write`; repository access stays
+  `contents: read`.
+- The workflow still publishes `0.0.<github.run_number>`. Manual dispatch is
+  available on `main`; other refs do not publish.
+
+Create a matching policy while privately signed in to
+[NuGet.org Trusted Publishing](https://www.nuget.org/account/trustedpublishing):
+
+| Policy field | Value for this repository |
+|---|---|
+| GitHub repository owner | `TripleG3` |
+| Repository | `TripleG3.AI.Tools.AutoGeneration` |
+| Workflow filename | `nuget-publish.yml` (filename only) |
+| GitHub environment | `nuget` |
+| Package pattern | `TripleG3.AI.Tools.AutoGeneration` |
+| Scope | Push new versions of this existing package |
+| Policy owner | The NuGet account/organization that owns this package |
+
+The policy must be active and the configured NuGet username must match the
+publisher account. No password, MFA code, or permanent API key belongs in the
+workflow or repository. After a trusted publication succeeds, revoke an unused
+old NuGet key and remove its obsolete GitHub secret if nothing else uses it.
+
+A run created before this workflow change still uses its original API-key
+workflow when rerun. Use a run from the Trusted Publishing commit, or dispatch
+the current workflow on `main`. Temporary keys expire after one hour, so do not
+move login ahead of long-running builds.
 
 ## Dependency injection
 
